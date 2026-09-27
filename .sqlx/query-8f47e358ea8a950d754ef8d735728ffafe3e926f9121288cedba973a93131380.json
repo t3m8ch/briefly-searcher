@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO telegram_session (session) VALUES ('SECRET-SESSION-7f3a')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "8f47e358ea8a950d754ef8d735728ffafe3e926f9121288cedba973a93131380"
+}

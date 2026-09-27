@@ -11,9 +11,12 @@ briefly-searcher-storage = { path = "crates/storage" }
 briefly-searcher-telegram = { path = "crates/telegram" }
 
 anyhow = "1.0.104"
+askama = "0.16.1"
+axum = "0.8.9"
 clap = { version = "4.6.7", features = ["derive"] }
 dotenvy = "0.15.7"
 envconfig = "0.11.1"
+http-body-util = "0.1.5"
 serde_json = "1.0.151"
 sqlx = { version = "0.9.0", default-features = false, features = [
     "runtime-tokio",
@@ -26,6 +29,8 @@ sqlx = { version = "0.9.0", default-features = false, features = [
 ] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 thiserror = "2.0.21"
-tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.7.1", features = ["timeout"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

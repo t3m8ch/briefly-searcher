@@ -45,6 +45,36 @@ pub struct RawMessage<'a> {
     pub payload_schema: &'a str,
 }
 
+/// Сводка для веб-админки: состояние загрузки одним согласованным снимком.
+///
+/// Секретов (сессии Telegram) и `payload` сообщений в сводке нет.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdminSummary {
+    /// Момент снимка по часам PostgreSQL; с ним сравниваются остальные времена.
+    pub now: DateTime<Utc>,
+    /// Наибольший `message_id`, до которого все сообщения канала сохранены;
+    /// `None`, пока первый проход не завершён.
+    pub newest_fetched_id: Option<i64>,
+    /// Докуда дошёл незавершённый проход: `min(message_id)` среди строк новее
+    /// `newest_fetched_id` (при `None` — среди всех строк). `None`, если
+    /// незавершённого прохода нет.
+    pub pass_reached_id: Option<i64>,
+    /// Число сообщений в `raw_posts`.
+    pub raw_posts_count: i64,
+    /// Срок паузы после `FLOOD_WAIT`; может быть уже в прошлом.
+    pub flood_wait_until: Option<DateTime<Utc>>,
+    /// Последний успешный запрос к Telegram.
+    pub last_successful_request_at: Option<DateTime<Utc>>,
+    /// Последний heartbeat основного цикла загрузчика.
+    pub last_heartbeat_at: Option<DateTime<Utc>>,
+    /// Последняя ошибка загрузчика; после успешных запросов не очищается.
+    pub last_error: Option<String>,
+    /// Когда случилась последняя ошибка.
+    pub last_error_at: Option<DateTime<Utc>>,
+    /// Когда загрузчик повторит попытку после ошибки.
+    pub next_attempt_at: Option<DateTime<Utc>>,
+}
+
 /// Пул соединений с PostgreSQL.
 #[derive(Clone, Debug)]
 pub struct Storage {
@@ -133,6 +163,35 @@ impl Storage {
         .await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    /// Собирает сводку для веб-админки.
+    pub async fn admin_summary(&self) -> Result<AdminSummary, Error> {
+        // Один оператор видит один снимок данных (READ COMMITTED), поэтому
+        // счётчик и граница прохода не разойдутся посреди сохранения страницы.
+        let summary = sqlx::query_as!(
+            AdminSummary,
+            r#"
+            SELECT
+                now() AS "now!",
+                i.newest_fetched_id,
+                -- Как в pass_state: без OR min() читает одну запись индекса.
+                (SELECT min(message_id) FROM raw_posts
+                  WHERE message_id > COALESCE(i.newest_fetched_id, 0)
+                ) AS pass_reached_id,
+                (SELECT count(*) FROM raw_posts) AS "raw_posts_count!",
+                i.flood_wait_until,
+                i.last_successful_request_at,
+                w.last_heartbeat_at,
+                w.last_error,
+                w.last_error_at,
+                w.next_attempt_at
+            FROM ingestion_state i CROSS JOIN worker_state w
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(summary)
     }
 }
 

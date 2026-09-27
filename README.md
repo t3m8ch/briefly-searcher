@@ -6,7 +6,7 @@ Briefly Searcher — поиск по каналу @brieflyru. План — [docs
 
 - `crates/telegram` — доступ к Telegram;
 - `crates/storage` — PostgreSQL: схема, миграции и все SQL-запросы;
-- `crates/app` — бинарник `briefly-searcher` с командами.
+- `crates/app` — бинарник `briefly-searcher` с командами и веб-админкой (`src/web`, шаблон `templates/admin.html`, вшитый htmx 2.0.11 в `assets/`).
 
 ## Разработка
 
@@ -18,8 +18,11 @@ DATABASE_URL=postgres://postgres:postgres@localhost/briefly_searcher
 
 ```sh
 cargo run -- migrate          # применить миграции к БД из DATABASE_URL
+cargo run -- web              # веб-админка только для чтения на http://127.0.0.1:3000
 cargo test --workspace        # тесты #[sqlx::test] создают временные БД через DATABASE_URL
 ```
+
+Адрес веб-админки задаёт `WEB_ADDR` (по умолчанию `127.0.0.1:3000`). Админка отвечает только на запросы с `Host` вида `localhost` или loopback-адреса (защита от DNS rebinding), поэтому открывать её нужно по такому адресу, например `http://localhost:3000`.
 
 Логи пишутся в stdout; уровень задаёт `RUST_LOG` (по умолчанию `info`).
 
