@@ -259,7 +259,7 @@ async fn page_contains_summary_and_polls_status(pool: PgPool) {
     assert!(body.contains(r#"hx-get="/status""#), "{body}");
     // Пока на странице выделен текст, опрос пропускается, чтобы не сбросить выделение.
     assert!(
-        body.contains(r#"hx-trigger="every 5s [nothingSelected()]""#),
+        body.contains(r#"hx-trigger="every 1s [nothingSelected()]""#),
         "{body}"
     );
     assert!(body.contains("function nothingSelected()"), "{body}");
