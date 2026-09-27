@@ -258,6 +258,8 @@ async fn page_contains_summary_and_polls_status(pool: PgPool) {
     );
     assert!(body.contains(r#"hx-get="/status""#), "{body}");
     assert!(body.contains(r#"hx-trigger="every 5s""#), "{body}");
+    // Settle без задержки: время переводится в пояс браузера до отрисовки кадра.
+    assert!(body.contains(r#"hx-swap="innerHTML settle:0ms""#), "{body}");
     assert!(
         body.contains(r#"<script src="/htmx.min.js"></script>"#),
         "{body}"

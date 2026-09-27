@@ -64,8 +64,11 @@
 </head>
 <body>
 {#- Блок заменяется ответом /status раз в 5 с. Ответы 4xx/5xx и обрыв связи
-    htmx 2 не вставляет, поэтому на экране остаются последние данные. -#}
-<main class="box" id="status" hx-get="/status" hx-trigger="every 5s" hx-swap="innerHTML">
+    htmx 2 не вставляет, поэтому на экране остаются последние данные.
+    settle:0ms: htmx:load (перевод времени из UTC) срабатывает сразу после
+    вставки, до отрисовки кадра; с задержкой по умолчанию (20 мс) времена
+    мелькали в UTC, а журнал сдвигался. -#}
+<main class="box" id="status" hx-get="/status" hx-trigger="every 5s" hx-swap="innerHTML settle:0ms">
 {%- block status %}
 <div class="t-prompt">$ briefly-searcher status · сводка на {% call moment(s.now) %}{% endcall %}</div>
 <div class="t-status"><span class="t-dot {{ s.loader.tone.class() }}"></span>briefly-searcher loader — <span class="{{ s.loader.tone.class() }}">{{ s.loader.title }}</span></div>
