@@ -5,5 +5,13 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+reqwest.workspace = true
+scraper.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true

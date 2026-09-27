@@ -4,7 +4,7 @@ Briefly Searcher — поиск по каналу @brieflyru. План — [docs
 
 ## Crates
 
-- `crates/telegram` — доступ к Telegram;
+- `crates/telegram` — доступ к Telegram: источник истории на веб-ленте `t.me/s` (записанные страницы для тестов — в `tests/fixtures/`);
 - `crates/storage` — PostgreSQL: схема, миграции и все SQL-запросы;
 - `crates/app` — бинарник `briefly-searcher` с командами и веб-админкой (`src/web`, шаблон `templates/admin.html`, вшитый htmx 2.0.11 в `assets/`).
 
