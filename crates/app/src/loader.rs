@@ -15,6 +15,14 @@ use chrono::{DateTime, TimeDelta, Utc};
 
 use crate::clock::Clock;
 
+/// Heartbeat пишется не реже этого в любом состоянии: ожидание — цикл тиков
+/// такой длины, и каждый тик обновляет `last_heartbeat_at`.
+pub const HEARTBEAT_INTERVAL: TimeDelta = TimeDelta::seconds(15);
+
+/// Сколько ждать ответа источника: зависший запрос становится ошибкой, а не
+/// тишиной в heartbeat.
+pub const REQUEST_TIMEOUT: TimeDelta = TimeDelta::seconds(30);
+
 /// Настройки темпа загрузчика.
 #[derive(Clone, Copy, Debug)]
 pub struct Settings {
@@ -24,6 +32,8 @@ pub struct Settings {
     pub request_delay: TimeDelta,
     /// Пауза между концом прохода и началом следующего.
     pub poll_interval: TimeDelta,
+    /// Пауза между ошибкой и следующей попыткой.
+    pub retry_delay: TimeDelta,
 }
 
 /// Ошибка, прервавшая проход или не давшая загрузчику начать работу.
@@ -36,6 +46,8 @@ pub enum Error {
     AlreadyRunning,
     #[error("ошибка источника истории: {0}")]
     Source(#[from] HistoryError),
+    #[error("источник истории не ответил за {} с", REQUEST_TIMEOUT.num_seconds())]
+    Timeout,
     #[error(transparent)]
     Storage(#[from] briefly_searcher_storage::Error),
 }
@@ -59,6 +71,9 @@ pub struct Loader<S, C> {
     settings: Settings,
     /// Когда источник ответил на последний запрос этого экземпляра.
     last_request_at: Option<DateTime<Utc>>,
+    /// До какого момента Telegram запретил запросы (`FLOOD_WAIT`). Хранится и
+    /// в БД; здесь — на случай, если записать срок в БД не удалось.
+    flood_wait_until: Option<DateTime<Utc>>,
 }
 
 impl<S: HistorySource, C: Clock> Loader<S, C> {
@@ -76,54 +91,89 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
             clock,
             settings,
             last_request_at: None,
+            flood_wait_until: None,
         }
     }
 
     /// Повторяет проходы с интервалом опроса, пока не завершится `shutdown`,
-    /// и держит `lock` до возврата. Пока возвращается и при первой же ошибке
-    /// источника или хранилища.
+    /// и держит `lock` до возврата. Из-за ошибок источника или хранилища не
+    /// завершается: записывает ошибку в `worker_state` и после паузы
+    /// `retry_delay` продолжает проход. Ошибку возвращает, только если не
+    /// удалось снять блокировку.
     ///
     /// Остановка не прерывает сохранение: полученная от источника страница
     /// сохраняется своей транзакцией, и только потом `run` возвращается.
     /// Запрос, на который источник ещё не ответил, бросается — после
-    /// перезапуска он повторится. Новых запросов после сигнала нет.
+    /// перезапуска он повторится. Новых запросов после сигнала нет; ожидание
+    /// между проходами, перед повтором и во время паузы `FLOOD_WAIT`
+    /// прерывается сигналом.
     ///
     /// `lock` передаётся по значению: вместе с ним `run` забирает
     /// ответственность за снятие блокировки. Только `run` знает, когда работа
-    /// закончилась, в том числе по ошибке, поэтому снимает блокировку сам при
-    /// любом исходе. Вызывающий код не может ни забыть её снять, ни уронить
-    /// раньше времени, пока идут проходы: блокировка живёт ровно столько,
-    /// сколько `run`. Получить `LoaderLock` можно только через [`lock`] — до
-    /// создания источника.
+    /// закончилась, поэтому снимает блокировку сам. Вызывающий код не может ни
+    /// забыть её снять, ни уронить раньше времени, пока идут проходы:
+    /// блокировка живёт ровно столько, сколько `run`. Получить `LoaderLock`
+    /// можно только через [`lock`] — до создания источника.
     pub async fn run(
         &mut self,
         lock: LoaderLock,
         shutdown: impl Future<Output = ()>,
     ) -> Result<(), Error> {
-        let result = self.run_passes(shutdown).await;
-        // Снимается при любом исходе проходов. Если сломалось и то и другое,
-        // возвращается ошибка прохода: она объясняет, почему загрузчик встал.
-        let released = lock.release().await;
-        result?;
-        Ok(released?)
+        self.run_passes(shutdown).await;
+        Ok(lock.release().await?)
     }
 
-    async fn run_passes(&mut self, shutdown: impl Future<Output = ()>) -> Result<(), Error> {
+    async fn run_passes(&mut self, shutdown: impl Future<Output = ()>) {
         let mut shutdown = pin!(shutdown);
         loop {
-            match self.pass(shutdown.as_mut()).await? {
-                ControlFlow::Continue(saved) => tracing::info!(saved, "проход завершён"),
-                ControlFlow::Break(saved) => {
-                    tracing::info!(saved, "проход остановлен по сигналу");
-                    return Ok(());
+            let next_attempt_at = match self.pass(shutdown.as_mut()).await {
+                Ok(ControlFlow::Continue(saved)) => {
+                    tracing::info!(saved, "проход завершён");
+                    self.clock.now() + self.settings.poll_interval
                 }
-            }
-            let next_pass_at = self.clock.now() + self.settings.poll_interval;
-            let sleep = self.clock.sleep_until(next_pass_at);
-            if unless_stopped(shutdown.as_mut(), sleep).await.is_break() {
-                return Ok(());
+                Ok(ControlFlow::Break(saved)) => {
+                    tracing::info!(saved, "проход остановлен по сигналу");
+                    return;
+                }
+                Err(error) => self.record_error(&error).await,
+            };
+            let wait = self.wait_until(next_attempt_at);
+            if unless_stopped(shutdown.as_mut(), wait).await.is_break() {
+                return;
             }
         }
+    }
+
+    /// Ждёт до `deadline` тиками не длиннее [`HEARTBEAT_INTERVAL`], записывая
+    /// heartbeat в начале каждого тика и в конце ожидания.
+    ///
+    /// Heartbeat пишет основной цикл, а не фоновая задача, чтобы зависший
+    /// цикл не выглядел живым. Ошибка записи heartbeat ожидание не прерывает.
+    async fn wait_until(&self, deadline: DateTime<Utc>) {
+        loop {
+            let now = self.clock.now();
+            if let Err(error) = self.storage.record_heartbeat(now).await {
+                tracing::warn!(%error, "не удалось записать heartbeat");
+            }
+            if now >= deadline {
+                return;
+            }
+            self.clock
+                .sleep_until(deadline.min(now + HEARTBEAT_INTERVAL))
+                .await;
+        }
+    }
+
+    /// Записывает ошибку и возвращает время следующей попытки.
+    async fn record_error(&self, error: &Error) -> DateTime<Utc> {
+        let at = self.clock.now();
+        let next_attempt_at = at + self.settings.retry_delay;
+        tracing::error!(%error, %next_attempt_at, "проход прерван ошибкой");
+        let text = error.to_string();
+        if let Err(error) = self.storage.record_error(&text, at, next_attempt_at).await {
+            tracing::error!(%error, "не удалось записать ошибку в worker_state");
+        }
+        next_attempt_at
     }
 
     /// Выполняет один проход: продолжает незавершённый или начинает новый с
@@ -145,6 +195,9 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
         &mut self,
         mut shutdown: Pin<&mut impl Future<Output = ()>>,
     ) -> Result<ControlFlow<u64, u64>, Error> {
+        // Срок паузы мог записать предыдущий экземпляр загрузчика.
+        let stored_flood_wait = self.storage.flood_wait_until().await?;
+        self.flood_wait_until = self.flood_wait_until.max(stored_flood_wait);
         let state = self.storage.pass_state().await?;
         let mut before = state.resume_before;
         let mut saved = 0;
@@ -153,7 +206,14 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
             let ControlFlow::Continue(page) = unless_stopped(shutdown.as_mut(), fetch).await else {
                 return Ok(ControlFlow::Break(saved));
             };
-            let page = page?;
+            let page = match page {
+                // Срок паузы, как и страница, записывается и при остановке.
+                Err(Error::Source(HistoryError::FloodWait(seconds))) => {
+                    self.start_flood_wait(seconds).await?;
+                    continue;
+                }
+                page => page?,
+            };
             let messages: Vec<_> = page.iter().map(raw_message).collect();
             let fetched_at = self.clock.now();
             // Проход завершается на пустой странице (начало канала) или на
@@ -172,19 +232,35 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
     }
 
     /// Запрашивает страницу не раньше чем через `request_delay` после ответа
-    /// на предыдущий запрос.
-    async fn fetch_page(&mut self, before: Option<i64>) -> Result<Vec<Message>, HistoryError> {
-        if let Some(last) = self.last_request_at {
-            self.clock
-                .sleep_until(last + self.settings.request_delay)
-                .await;
-        }
-        let page = self
-            .source
-            .fetch_page(before, self.settings.page_size)
+    /// на предыдущий запрос и не раньше конца паузы `FLOOD_WAIT`; источник
+    /// ждёт не дольше [`REQUEST_TIMEOUT`].
+    async fn fetch_page(&mut self, before: Option<i64>) -> Result<Vec<Message>, Error> {
+        let not_before = self
+            .last_request_at
+            .map(|last| last + self.settings.request_delay)
+            .max(self.flood_wait_until);
+        self.wait_until(not_before.unwrap_or_else(|| self.clock.now()))
             .await;
+        let timeout_at = self.clock.now() + REQUEST_TIMEOUT;
+        let page = tokio::select! {
+            // Первым проверяется ответ: поддельные часы в тестах
+            // «дожидаются» таймаута мгновенно.
+            biased;
+            page = self.source.fetch_page(before, self.settings.page_size) => page,
+            () = self.clock.sleep_until(timeout_at) => return Err(Error::Timeout),
+        };
         self.last_request_at = Some(self.clock.now());
-        page
+        Ok(page?)
+    }
+
+    /// Записывает срок паузы после `FloodWait(seconds)`: до него запросов к
+    /// источнику не будет, в том числе после перезапуска.
+    async fn start_flood_wait(&mut self, seconds: u32) -> Result<(), Error> {
+        let until = self.clock.now() + TimeDelta::seconds(seconds.into());
+        tracing::warn!(%until, "Telegram требует подождать {seconds} с (FLOOD_WAIT)");
+        self.flood_wait_until = Some(until);
+        self.storage.set_flood_wait_until(until).await?;
+        Ok(())
     }
 }
 

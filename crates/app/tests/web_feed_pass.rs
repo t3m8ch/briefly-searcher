@@ -25,6 +25,7 @@ async fn first_pass_walks_recorded_start_of_channel_down_to_empty_page(pool: PgP
         page_size: 100,
         request_delay: TimeDelta::zero(),
         poll_interval: TimeDelta::minutes(10),
+        retry_delay: TimeDelta::minutes(1),
     };
     let mut loader = Loader::new(
         Storage::from_pool(pool.clone()),

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE worker_state\n             SET last_error = $1, last_error_at = $2, next_attempt_at = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "729ed70ee5056f169d81e15a77a8177c0d24d5a093223b2b863d7ef1448cc85a"
+}

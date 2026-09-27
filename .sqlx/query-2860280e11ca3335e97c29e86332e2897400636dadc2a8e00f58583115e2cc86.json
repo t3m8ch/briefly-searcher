@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT last_heartbeat_at FROM worker_state",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "last_heartbeat_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "worker_state",
+            "name": "last_heartbeat_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "2860280e11ca3335e97c29e86332e2897400636dadc2a8e00f58583115e2cc86"
+}
