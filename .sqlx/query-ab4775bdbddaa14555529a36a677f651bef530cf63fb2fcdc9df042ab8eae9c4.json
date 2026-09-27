@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                s.newest_fetched_id,\n                (\n                    SELECT min(p.message_id)\n                    FROM raw_posts p\n                    WHERE s.newest_fetched_id IS NULL OR p.message_id > s.newest_fetched_id\n                ) AS resume_offset_id\n            FROM ingestion_state s\n            ",
+  "query": "\n            SELECT\n                s.newest_fetched_id,\n                (\n                    SELECT min(p.message_id)\n                    FROM raw_posts p\n                    WHERE p.message_id > COALESCE(s.newest_fetched_id, 0)\n                ) AS resume_offset_id\n            FROM ingestion_state s\n            ",
   "describe": {
     "columns": [
       {
@@ -29,5 +29,5 @@
       null
     ]
   },
-  "hash": "84255bd54afdb657af28e26a9512d77425aea81058fbcbeaa29cc31834ef96eb"
+  "hash": "ab4775bdbddaa14555529a36a677f651bef530cf63fb2fcdc9df042ab8eae9c4"
 }

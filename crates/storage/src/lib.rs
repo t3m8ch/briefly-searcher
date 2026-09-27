@@ -79,6 +79,11 @@ impl Storage {
         // Проход сохраняет только сообщения не новее своей первой страницы и
         // идёт вниз без пропусков, поэтому строки новее newest_fetched_id —
         // ровно то, что успел сохранить незавершённый проход.
+        //
+        // ID сообщений Telegram положительны, поэтому NULL заменяется на 0.
+        // Условие без OR попадает в Index Cond: min() читает одну запись
+        // первичного ключа (Index Only Scan), а не фильтрует весь диапазон
+        // до newest_fetched_id.
         let state = sqlx::query_as!(
             PassState,
             r#"
@@ -87,7 +92,7 @@ impl Storage {
                 (
                     SELECT min(p.message_id)
                     FROM raw_posts p
-                    WHERE s.newest_fetched_id IS NULL OR p.message_id > s.newest_fetched_id
+                    WHERE p.message_id > COALESCE(s.newest_fetched_id, 0)
                 ) AS resume_offset_id
             FROM ingestion_state s
             "#
