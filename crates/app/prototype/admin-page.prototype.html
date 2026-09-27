@@ -1,7 +1,9 @@
 <!doctype html>
 <!--
   ПРОТОТИП, выбросить. Issue #6: как выглядит страница веб-админки.
-  План: пять структурно разных вариантов страницы `GET /`, переключаются `?variant=A…E` и плашкой внизу;
+  Раунд 2: из пяти вариантов (A–E, см. предыдущий коммит) понравились C (хронология) и D (терминал).
+  F и G объединяют ленту событий из C со стилистикой D; C и D оставлены для сравнения.
+  Переключение — `?variant=F|G|C|D` и плашка внизу;
   состояние загрузчика (фейковые данные) переключается `?state=…` там же.
   Веб-сервера в проекте ещё нет, поэтому это статический файл, а не маршрут axum: разметка каждого варианта —
   то, что отдал бы шаблон askama. Раз в 5 с блок сводки перерисовывается, как при опросе `/status` через HTMX.
@@ -33,38 +35,6 @@
   .muted { color: var(--muted); }
   .t-ok { color: var(--ok); } .t-warn { color: var(--warn); } .t-bad { color: var(--bad); } .t-idle { color: var(--idle); }
 
-  /* ---------- A: карточка состояния и список ---------- */
-  .a-wrap { max-width: 680px; margin: 0 auto; padding: 28px 16px; }
-  .a-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; }
-  .a-top h1 { font-size: 17px; margin: 0; }
-  .a-stack { display: grid; gap: 12px; }
-  .a-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
-  .a-state { display: flex; gap: 14px; }
-  .a-dot { width: 14px; height: 14px; border-radius: 50%; margin-top: 9px; flex: none; }
-  .a-state-title { font-size: 26px; font-weight: 700; line-height: 1.2; }
-  .a-banner { border-radius: 10px; padding: 12px 14px; background: var(--warn-soft); border-left: 4px solid var(--warn); }
-  .a-err { border-radius: 10px; padding: 12px 14px; background: var(--bad-soft); border-left: 4px solid var(--bad); }
-  .a-err pre { margin: 6px 0; white-space: pre-wrap; }
-  .a-err.past { background: transparent; border: 1px dashed var(--line); color: var(--muted); }
-  .a-h-main { font-size: 20px; font-weight: 650; }
-  .a-dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; margin: 0; }
-  .a-dl dt { color: var(--muted); } .a-dl dd { margin: 0; }
-
-  /* ---------- B: плитки ---------- */
-  .b-strip { padding: 10px 24px; color: #fff; font-weight: 600; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  .b-strip.ok { background: #1e7a3c; } .b-strip.warn { background: #9a5800; } .b-strip.bad { background: #b3261e; } .b-strip.idle { background: #6c6c66; }
-  .b-strip span:last-child { font-weight: 400; opacity: .9; }
-  .b-wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
-  .b-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-  @media (max-width: 820px) { .b-grid { grid-template-columns: minmax(0, 1fr); } }
-  .b-tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-height: 140px; display: flex; flex-direction: column; gap: 6px; }
-  .b-tile.wide { grid-column: span 2; } @media (max-width: 820px) { .b-tile.wide { grid-column: auto; } }
-  .b-label { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 600; }
-  .b-big { font-size: 30px; font-weight: 700; line-height: 1.15; }
-  .b-tile.tone-warn { border-color: var(--warn); background: var(--warn-soft); }
-  .b-tile.tone-bad { border-color: var(--bad); background: var(--bad-soft); }
-  .b-tile pre { margin: 0; white-space: pre-wrap; }
-
   /* ---------- C: хронология ---------- */
   .c-wrap { max-width: 980px; margin: 0 auto; padding: 28px 16px; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 32px; }
   @media (max-width: 760px) { .c-wrap { grid-template-columns: minmax(0, 1fr); } }
@@ -92,46 +62,59 @@
   .d-box pre { margin: 0; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
   .d-ok { color: #6fd08f; } .d-warn { color: #f0b060; } .d-bad { color: #ff8a80; } .d-dim { color: #7c877c; } .d-key { color: #9fb6ff; }
 
-  /* ---------- E: шкала ID ---------- */
-  .e-wrap { max-width: 1040px; margin: 0 auto; padding: 28px 16px; }
-  .e-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 26px; }
-  .e-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; font-weight: 600; }
-  .e-pill.ok { background: var(--ok-soft); color: var(--ok); } .e-pill.warn { background: var(--warn-soft); color: var(--warn); }
-  .e-pill.bad { background: var(--bad-soft); color: var(--bad); } .e-pill.idle { background: var(--idle-soft); color: var(--idle); }
-  .e-hero { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px 22px 18px; }
-  .e-hero-title { font-size: 22px; font-weight: 700; margin-bottom: 2px; }
-  .e-bar { position: relative; height: 34px; border-radius: 8px; margin: 34px 0 30px; background: var(--idle-soft); overflow: visible; }
-  .e-seg { position: absolute; top: 0; bottom: 0; }
-  .e-seg.saved { background: var(--ok); opacity: .85; }
-  .e-seg.pass { background: var(--accent); opacity: .85; }
-  .e-seg.unknown { background: repeating-linear-gradient(45deg, transparent 0 6px, var(--line) 6px 12px); border-radius: 8px 0 0 8px; }
-  .e-seg.gap { background: repeating-linear-gradient(45deg, transparent 0 6px, var(--line) 6px 12px); }
-  .e-mark { position: absolute; top: -26px; transform: translateX(-50%); font-size: 12px; white-space: nowrap; color: var(--muted); }
-  .e-mark.below { top: 38px; }
-  .e-mark::after { content: ""; position: absolute; left: 50%; top: 18px; height: 12px; border-left: 1px solid var(--muted); }
-  .e-mark.below::after { top: -10px; }
-  .e-mark.start { transform: none; } .e-mark.start::after { left: 0; }
-  .e-mark.end { transform: translateX(-100%); } .e-mark.end::after { left: 100%; }
-  .e-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
-  .e-sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 5px; }
-  .e-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
-  @media (max-width: 760px) { .e-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  .e-kv { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
-  .e-kv .k { font-size: 12px; color: var(--muted); } .e-kv .v { font-weight: 600; }
-  .e-alert { margin-top: 14px; padding: 12px 14px; border-radius: 10px; }
-  .e-alert.warn { background: var(--warn-soft); } .e-alert.bad { background: var(--bad-soft); }
-  .e-alert.past { border: 1px dashed var(--line); color: var(--muted); }
-  .e-alert pre { margin: 4px 0 0; white-space: pre-wrap; }
+  /* ---------- общий терминальный стиль для F и G ---------- */
+  .t-page { min-height: 100vh; background: #0f1110; color: #d6dcd6; font-family: var(--mono); font-size: 14px; line-height: 1.6; padding: 28px 16px; }
+  .t-ok { color: #6fd08f; } .t-warn2 { color: #f0b060; } .t-bad2 { color: #ff8a80; } .t-dim { color: #7c877c; } .t-key { color: #9fb6ff; } .t-now { color: #9fb6ff; }
+  .t-prompt { color: #7c877c; margin-bottom: 10px; }
+  .t-status { font-size: 18px; font-weight: 700; line-height: 1.35; }
+  .t-block { margin-top: 18px; }
+  .t-label { color: #9fb6ff; }
+  .t-big { font-size: 20px; font-weight: 700; color: #ecf0ec; }
+  /* журнал: время | относительно | метка на вертикальной линии | событие */
+  .j { display: grid; grid-template-columns: max-content max-content 22px minmax(0, 1fr); column-gap: 12px; }
+  .j-row { display: contents; }
+  .j-row > span { padding: 5px 0; }
+  .j-when { color: #aab3aa; }
+  .j-rel { color: #7c877c; text-align: right; }
+  .j-mark { text-align: center; background: linear-gradient(#2c332c, #2c332c) center / 1px 100% no-repeat; }
+  .j-mark i { font-style: normal; background: #0f1110; padding: 2px 0; }
+  .j-what { color: #ecf0ec; }
+  .j-extra { grid-column: 4; padding: 0 0 6px; white-space: pre-wrap; margin-top: -4px; }
+  .j-gap { grid-column: 3; background: linear-gradient(#2c332c, #2c332c) center / 1px 100% no-repeat; }
+  .j-row.future .j-what, .j-row.future .j-when { color: #aab3aa; }
+  .j-now { grid-column: 1 / -1; color: #9fb6ff; font-weight: 700; padding: 8px 0; white-space: nowrap; overflow: hidden; }
+  .j-now::after { content: " ──────────────────────────────────────────────────────────────────────────────────────"; font-weight: 400; }
+  @media (max-width: 640px) {
+    .j { grid-template-columns: 22px minmax(0, 1fr); }
+    .j-row > .j-when, .j-row > .j-rel { display: none; }
+    .j-when-inline { display: block !important; color: #7c877c; font-size: 12px; }
+    .j-extra { grid-column: 2; } .j-gap { grid-column: 1; }
+  }
+  .j-when-inline { display: none; }
+
+  /* ---------- F: терминал в две колонки ---------- */
+  .f-grid { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 40px; }
+  @media (max-width: 860px) { .f-grid { grid-template-columns: minmax(0, 1fr); gap: 28px; } }
+  .f-side { border-right: 1px solid #242a24; padding-right: 32px; }
+  @media (max-width: 860px) { .f-side { border-right: 0; padding-right: 0; border-bottom: 1px solid #242a24; padding-bottom: 20px; } }
+
+  /* ---------- G: systemctl status с журналом ---------- */
+  .g-box { max-width: 900px; margin: 0 auto; }
+  .g-head { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 16px; row-gap: 2px; margin: 8px 0 0 22px; }
+  @media (max-width: 640px) { .g-head { grid-template-columns: minmax(0, 1fr); margin-left: 0; } .g-head .t-label { margin-top: 6px; } }
+  .g-journal-title { margin: 26px 0 6px; color: #7c877c; }
 
   /* ---------- плашка-переключатель (не часть дизайна) ---------- */
   .proto-bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 99; display: flex; align-items: center; gap: 6px;
-    background: #111; color: #fff; border-radius: 999px; padding: 6px 8px; box-shadow: 0 6px 24px rgba(0,0,0,.35);
+    background: #ffd84d; color: #111; border-radius: 999px; padding: 6px 8px; box-shadow: 0 6px 24px rgba(0,0,0,.35);
     font: 13px/1.2 system-ui, sans-serif; width: max-content; max-width: calc(100vw - 16px); flex-wrap: wrap; justify-content: center; }
-  .proto-bar button { background: #2a2a2a; color: #fff; border: 0; border-radius: 999px; width: 30px; height: 30px; font-size: 15px; cursor: pointer; }
-  .proto-bar button:hover { background: #444; }
-  .proto-bar .lbl { min-width: 190px; text-align: center; font-weight: 600; }
-  .proto-bar select { background: #2a2a2a; color: #fff; border: 0; border-radius: 999px; padding: 6px 10px; font: inherit; }
-  .proto-bar .sep { width: 1px; height: 20px; background: #444; margin: 0 4px; }
+  .proto-bar button { background: #111; color: #fff; border: 0; border-radius: 999px; width: 30px; height: 30px; font-size: 15px; cursor: pointer; }
+  .proto-bar button:hover { background: #333; }
+  .proto-bar .lbl { min-width: 250px; text-align: center; font-weight: 600; }
+  .proto-bar select { background: #111; color: #fff; border: 0; border-radius: 999px; padding: 6px 10px; font: inherit; }
+  .proto-bar .sep { width: 1px; height: 20px; background: rgba(0,0,0,.25); margin: 0 4px; }
+  @media (max-width: 640px) { .proto-bar .lbl { min-width: 0; flex: 1; } .proto-bar .sep { display: none; } }
+  body[data-dark="true"] { background: #0f1110; }
 </style>
 </head>
 <body>
@@ -227,48 +210,6 @@ function localizeTimes(root) {
   });
 }
 
-// ---------------------------------------------------------------- вариант A: карточка состояния и список
-function VariantA(r) {
-  const v = derive(r);
-  let h = `<div class="a-wrap"><div class="a-top"><h1>Briefly Searcher · загрузчик</h1><span class="muted" style="font-size:13px">Сводка на ${time(r.now)}</span></div><div class="a-stack">`;
-  h += `<div class="a-card a-state"><span class="a-dot" style="background:var(--${v.loader.tone})"></span><div>
-    <div class="a-state-title">${esc(v.loader.title)}</div><div class="muted">${esc(v.loader.why)}</div></div></div>`;
-  if (v.pauseActive) h += `<div class="a-banner"><b>Пауза Telegram до ${time(r.flood_wait_until)}</b><div class="muted" style="font-size:14px">До этого времени запросы к Telegram не отправляются.</div></div>`;
-  if (r.last_error) h += v.errorPast
-    ? `<div class="a-err past">Последняя ошибка была в ${time(r.last_error_at)}: <code>${esc(r.last_error)}</code>. После неё загрузчик работал успешно.</div>`
-    : `<div class="a-err"><b>Ошибка в ${time(r.last_error_at)}</b><pre>${esc(r.last_error)}</pre>Следующая попытка: ${time(r.next_attempt_at)}</div>`;
-  h += `<div class="a-card"><div class="a-h-main">${esc(v.history.main)}</div>${v.history.sub ? `<div class="muted">${esc(v.history.sub)}</div>` : ''}</div>`;
-  h += `<div class="a-card"><dl class="a-dl">
-    <dt>Сообщений в raw_posts</dt><dd>${id(r.raw_posts_count)}</dd>
-    <dt>Heartbeat</dt><dd>${time(r.last_heartbeat_at)}</dd>
-    <dt>Последний успешный запрос</dt><dd>${time(r.last_successful_request_at)}</dd>
-    <dt>newest_fetched_id</dt><dd>${r.newest_fetched_id === null ? '<span class="muted">ещё нет</span>' : id(r.newest_fetched_id)}</dd>
-  </dl></div></div></div>`;
-  return h;
-}
-
-// ---------------------------------------------------------------- вариант B: плитки
-function VariantB(r) {
-  const v = derive(r);
-  const tile = (label, big, sub, cls = '') => `<div class="b-tile ${cls}"><div class="b-label">${label}</div><div class="b-big">${big}</div><div class="muted">${sub}</div></div>`;
-  let h = `<div class="b-strip ${v.loader.tone}"><span>Загрузчик: ${esc(v.loader.title)}</span><span>Сводка на ${time(r.now)}</span></div><div class="b-wrap"><div class="b-grid">`;
-  h += tile('Загрузчик', `<span class="t-${v.loader.tone}">${esc(v.loader.word)}</span>`,
-    r.last_heartbeat_at === null ? 'heartbeat ещё не было' : `heartbeat ${time(r.last_heartbeat_at)} · ${rel(r.last_heartbeat_at, r.now)}`);
-  h += v.pauseActive
-    ? tile('Telegram', 'Пауза', `до ${time(r.flood_wait_until)} · ${rel(r.flood_wait_until, r.now)}`, 'tone-warn')
-    : tile('Telegram', 'Без паузы', r.last_successful_request_at === null ? 'запросов ещё не было' : `успешный запрос ${time(r.last_successful_request_at)} · ${rel(r.last_successful_request_at, r.now)}`);
-  h += !r.last_error ? tile('Последняя ошибка', '<span class="muted">Нет</span>', 'ошибок не было')
-    : v.errorPast ? tile('Последняя ошибка', '<span class="muted">Прошла</span>', `${time(r.last_error_at)}: <code>${esc(r.last_error)}</code><br>после неё загрузчик работал успешно`)
-    : `<div class="b-tile tone-bad"><div class="b-label">Последняя ошибка</div><pre>${esc(r.last_error)}</pre><div class="muted">в ${time(r.last_error_at)}<br>повтор ${time(r.next_attempt_at)} · ${rel(r.next_attempt_at, r.now)}</div></div>`;
-  const histBig = v.history.kind === 'not_started' ? '<span class="muted">—</span>'
-    : v.history.kind === 'first_pass' ? `ID ${id(r.pass_reached_id)}` : `ID ${id(r.newest_fetched_id)}`;
-  const histLabel = v.history.kind === 'first_pass' ? 'Первый проход дошёл до' : v.history.kind === 'not_started' ? 'История' : 'История загружена до';
-  h += `<div class="b-tile wide"><div class="b-label">${histLabel}</div><div class="b-big">${histBig}</div><div class="muted">${esc(v.history.kind === 'first_pass' ? v.history.sub : v.history.sub || v.history.main)}</div></div>`;
-  h += tile('Сообщений сохранено', id(r.raw_posts_count), 'строк в raw_posts');
-  h += `</div></div>`;
-  return h;
-}
-
 // ---------------------------------------------------------------- вариант C: хронология
 function VariantC(r) {
   const v = derive(r);
@@ -321,64 +262,81 @@ function VariantD(r) {
   return `<div class="d-page"><div class="d-box"><div class="d-prompt">$ briefly-searcher status · сводка на ${time(r.now)}</div><pre>${lines.join('\n')}</pre></div></div>`;
 }
 
-// ---------------------------------------------------------------- вариант E: шкала ID
-function VariantE(r) {
-  const v = derive(r);
-  const top = r.max_id || 1;
-  // В очередном проходе новых ID мало по сравнению со всей историей, поэтому шкала показывает только хвост:
-  // слева — сжатая «вся история до newest_fetched_id», справа — новые ID.
-  const lo = v.history.kind === 'loaded_pass' ? r.newest_fetched_id - (top - r.newest_fetched_id) : 0;
-  const pct = (x) => `${Math.max(0, Math.min(100, ((x - lo) / (top - lo)) * 100)).toFixed(2)}%`;
-  const mark = (x, text, below) => {
-    const p = parseFloat(pct(x));
-    return `<div class="e-mark ${below ? 'below' : ''} ${p < 15 ? 'start' : p > 85 ? 'end' : ''}" style="left:${p}%">${text}</div>`;
-  };
-  let bar = '';
-  if (v.history.kind === 'first_pass') {
-    bar += `<div class="e-seg unknown" style="left:0;width:${pct(r.pass_reached_id)}"></div>`;
-    bar += `<div class="e-seg saved" style="left:${pct(r.pass_reached_id)};right:0;border-radius:0 8px 8px 0"></div>`;
-    bar += mark(r.pass_reached_id, `проход здесь · ID ${id(r.pass_reached_id)}`);
-    bar += mark(lo, 'начало канала: ?', true) + mark(top, `ID ${id(top)}`, true);
-  } else if (v.history.kind === 'loaded') {
-    bar += `<div class="e-seg saved" style="left:0;right:0;border-radius:8px"></div>` + mark(lo, 'начало канала', true) + mark(top, `ID ${id(top)}`, true);
-  } else if (v.history.kind === 'loaded_pass') {
-    bar += `<div class="e-seg saved" style="left:0;width:${pct(r.newest_fetched_id)};border-radius:8px 0 0 8px"></div>`;
-    bar += `<div class="e-seg gap" style="left:${pct(r.newest_fetched_id)};width:calc(${pct(r.pass_reached_id)} - ${pct(r.newest_fetched_id)})"></div>`;
-    bar += `<div class="e-seg pass" style="left:${pct(r.pass_reached_id)};right:0;border-radius:0 8px 8px 0"></div>`;
-    bar += mark(lo, '← вся история', true) + mark(r.newest_fetched_id, `newest_fetched_id ${id(r.newest_fetched_id)}`);
-    bar += mark(r.pass_reached_id, `проход · ${id(r.pass_reached_id)}`, true) + mark(top, `ID ${id(top)}`);
-  } else {
-    bar += `<div class="e-mark below" style="left:50%">ничего не сохранено</div>`;
-  }
-  let h = `<div class="e-wrap"><div class="e-head"><div style="font-weight:650">Briefly Searcher · загрузчик</div>
-    <div><span class="e-pill ${v.loader.tone}">● ${esc(v.loader.title)}</span> <span class="muted" style="font-size:13px">сводка на ${time(r.now)}</span></div></div>`;
-  h += `<div class="e-hero"><div class="e-hero-title">${esc(v.history.main)}</div><div class="muted">${esc(v.history.sub || '')}</div>
-    <div class="e-bar">${bar}</div>
-    <div class="e-legend"><span><i class="e-sw" style="background:var(--ok)"></i>сохранено</span><span><i class="e-sw" style="background:var(--accent)"></i>текущий проход</span>
-    <span><i class="e-sw" style="background:repeating-linear-gradient(45deg,transparent 0 3px,var(--muted) 3px 5px)"></i>ещё не загружено</span>
-    <span>Шкала — по ID сообщений, не по их числу: в ID есть пропуски.</span></div></div>`;
-  if (v.pauseActive) h += `<div class="e-alert warn"><b>Пауза Telegram до ${time(r.flood_wait_until)}</b> · ${rel(r.flood_wait_until, r.now)}</div>`;
-  if (r.last_error) h += v.errorPast
-    ? `<div class="e-alert past">Последняя ошибка была в ${time(r.last_error_at)}: <code>${esc(r.last_error)}</code>. После неё загрузчик работал успешно.</div>`
-    : `<div class="e-alert bad"><b>Ошибка в ${time(r.last_error_at)}</b>, повтор ${time(r.next_attempt_at)}<pre>${esc(r.last_error)}</pre></div>`;
-  h += `<div class="e-row">
-    <div class="e-kv"><div class="k">Сообщений в raw_posts</div><div class="v">${id(r.raw_posts_count)}</div></div>
-    <div class="e-kv"><div class="k">Heartbeat</div><div class="v">${time(r.last_heartbeat_at)}</div></div>
-    <div class="e-kv"><div class="k">Успешный запрос</div><div class="v">${time(r.last_successful_request_at)}</div></div>
-    <div class="e-kv"><div class="k">newest_fetched_id</div><div class="v">${r.newest_fetched_id === null ? '<span class="muted">ещё нет</span>' : id(r.newest_fetched_id)}</div></div></div></div>`;
-  return h;
+// ---------------------------------------------------------------- общее для F и G: события хронологии
+function timeline(r, v) {
+  const ev = [];
+  if (v.pauseActive) ev.push({ at: r.flood_wait_until, what: 'Закончится пауза Telegram (FLOOD_WAIT)', tone: 'warn' });
+  if (r.last_error && !v.errorPast && r.next_attempt_at) ev.push({ at: r.next_attempt_at, what: 'Следующая попытка запроса', tone: 'bad' });
+  if (r.last_heartbeat_at) ev.push({ at: r.last_heartbeat_at, what: 'Heartbeat загрузчика', tone: v.loader.kind === 'silent' ? 'bad' : 'ok',
+    extra: v.loader.kind === 'silent' ? '<span class="t-bad2">└ с тех пор загрузчик молчит</span>' : '' });
+  if (r.last_successful_request_at) ev.push({ at: r.last_successful_request_at, what: 'Успешный запрос к Telegram', tone: 'ok' });
+  if (r.last_error) ev.push({ at: r.last_error_at, what: v.errorPast ? 'Ошибка — после неё были успешные запросы' : 'Ошибка', tone: v.errorPast ? 'idle' : 'bad',
+    extra: `<span class="${v.errorPast ? 't-dim' : 't-bad2'}">└ ${esc(r.last_error)}</span>` });
+  ev.sort((a, b) => b.at - a.at);
+  const color = { ok: 't-ok', warn: 't-warn2', bad: 't-bad2', idle: 't-dim' };
+  const row = (e, future) => `<div class="j-row ${future ? 'future' : ''}">
+      <span class="j-when">${time(e.at)}</span><span class="j-rel">${rel(e.at, r.now)}</span>
+      <span class="j-mark"><i class="${color[e.tone]}">${future ? '○' : '●'}</i></span>
+      <span class="j-what"><span class="j-when-inline">${time(e.at)} · ${rel(e.at, r.now)}</span>${esc(e.what)}</span></div>
+    ${e.extra ? `<span class="j-gap"></span><div class="j-extra">${e.extra}</div>` : ''}`;
+  const future = ev.filter((e) => e.at > r.now), past = ev.filter((e) => e.at <= r.now);
+  let h = `<div class="j">`;
+  h += future.map((e) => row(e, true)).join('');
+  h += `<div class="j-now">── сейчас · ${time(r.now)}</div>`;
+  h += past.length ? past.map((e) => row(e, false)).join('') : `<div class="j-row"><span class="j-when"></span><span class="j-rel"></span><span class="j-mark"></span><span class="j-what t-dim">событий ещё не было</span></div>`;
+  return h + `</div>`;
+}
+const toneClass = (tone) => ({ ok: 't-ok', warn: 't-warn2', bad: 't-bad2', idle: 't-dim' }[tone]);
+function historyLines(r, v) {
+  if (v.history.kind === 'not_started') return { label: 'История', big: 'не начата', sub: 'загрузка ещё не начиналась' };
+  if (v.history.kind === 'first_pass') return { label: 'Первый проход', big: `дошёл до ID ${id(r.pass_reached_id)}`, sub: 'сколько осталось до начала канала — неизвестно' };
+  if (v.history.kind === 'loaded_pass') return { label: 'История', big: `загружена до ID ${id(r.newest_fetched_id)}`, sub: `проход за новыми дошёл до ID ${id(r.pass_reached_id)}` };
+  return { label: 'История', big: `загружена до ID ${id(r.newest_fetched_id)}`, sub: 'незавершённого прохода нет' };
+}
+
+// ---------------------------------------------------------------- вариант F: терминал в две колонки (C + D)
+function VariantF(r) {
+  const v = derive(r), c = toneClass(v.loader.tone), hl = historyLines(r, v);
+  return `<div class="t-page"><div class="f-grid">
+    <section class="f-side">
+      <div class="t-prompt">$ briefly-searcher status</div>
+      <div class="t-status"><span class="${c}">●</span> loader — <span class="${c}">${esc(v.loader.title.toLowerCase())}</span></div>
+      <div class="t-dim">${esc(v.loader.why)}</div>
+      <div class="t-block"><div class="t-label">${hl.label}</div><div class="t-big">${hl.big}</div><div class="t-dim">${hl.sub}</div></div>
+      <div class="t-block"><div class="t-label">raw_posts</div><div class="t-big">${id(r.raw_posts_count)}</div><div class="t-dim">сообщений сохранено</div></div>
+      <div class="t-block"><div class="t-label">newest_fetched_id</div><div class="t-big">${r.newest_fetched_id === null ? '<span class="t-dim">NULL</span>' : id(r.newest_fetched_id)}</div></div>
+      <div class="t-block t-dim" style="font-size:12px">сводка на ${time(r.now)}</div>
+    </section>
+    <section><div class="t-prompt">$ briefly-searcher journal</div>${timeline(r, v)}</section>
+  </div></div>`;
+}
+
+// ---------------------------------------------------------------- вариант G: systemctl status с журналом (C + D)
+function VariantG(r) {
+  const v = derive(r), c = toneClass(v.loader.tone), hl = historyLines(r, v);
+  return `<div class="t-page"><div class="g-box">
+    <div class="t-prompt">$ briefly-searcher status · сводка на ${time(r.now)}</div>
+    <div class="t-status"><span class="${c}">●</span> briefly-searcher loader — <span class="${c}">${esc(v.loader.title.toLowerCase())}</span></div>
+    <div class="g-head">
+      <span class="t-label">Состояние:</span><span class="t-dim">${esc(v.loader.why)}</span>
+      <span class="t-label">${hl.label}:</span><span><b>${hl.big}</b> <span class="t-dim">— ${hl.sub}</span></span>
+      <span class="t-label">raw_posts:</span><span>${id(r.raw_posts_count)} сообщений</span>
+      <span class="t-label">newest_fetched_id:</span><span>${r.newest_fetched_id === null ? '<span class="t-dim">NULL</span>' : id(r.newest_fetched_id)}</span>
+    </div>
+    <div class="g-journal-title">Журнал:</div>
+    ${timeline(r, v)}
+  </div></div>`;
 }
 
 // ---------------------------------------------------------------- переключатель
 const VARIANTS = [
-  ['A', 'Карточка и список', VariantA],
-  ['B', 'Плитки', VariantB],
-  ['C', 'Хронология', VariantC],
-  ['D', 'Терминал', VariantD],
-  ['E', 'Шкала ID', VariantE],
+  ['F', 'Терминал + хронология, две колонки', VariantF],
+  ['G', 'systemctl status с журналом', VariantG],
+  ['C', 'Хронология (исходный)', VariantC],
+  ['D', 'Терминал (исходный)', VariantD],
 ];
 const params = new URLSearchParams(location.search);
-let vi = Math.max(0, VARIANTS.findIndex(([k]) => k === (params.get('variant') || 'A').toUpperCase()));
+let vi = Math.max(0, VARIANTS.findIndex(([k]) => k === (params.get('variant') || 'F').toUpperCase()));
 let stateKey = STATES[params.get('state')] ? params.get('state') : 'first_pass';
 let summary = makeSummary(stateKey, Date.now());
 
@@ -390,6 +348,7 @@ function syncUrl() {
 function render() {
   const app = document.getElementById('app');
   app.innerHTML = VARIANTS[vi][2](summary);
+  document.body.dataset.dark = ['D', 'F', 'G'].includes(VARIANTS[vi][0]);
   localizeTimes(app);
   document.getElementById('vlabel').textContent = `${VARIANTS[vi][0]} · ${VARIANTS[vi][1]}`;
 }
