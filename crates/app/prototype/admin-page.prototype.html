@@ -76,8 +76,11 @@
   .j-row > span { padding: 5px 0; }
   .j-when { color: #aab3aa; }
   .j-rel { color: #7c877c; text-align: right; }
-  .j-mark { text-align: center; background: linear-gradient(#2c332c, #2c332c) center / 1px 100% no-repeat; }
-  .j-mark i { font-style: normal; background: #0f1110; padding: 2px 0; }
+  .j-mark { display: flex; align-items: center; justify-content: center; background: linear-gradient(#2c332c, #2c332c) center / 1px 100% no-repeat; }
+  .j-dot { width: 9px; height: 9px; border-radius: 50%; border: 2px solid currentColor; background: currentColor; box-shadow: 0 0 0 3px #0f1110; }
+  .j-dot.future { background: #0f1110; }
+  /* кружок состояния: CSS, а не символ ●, чтобы стоял по центру строчных букв */
+  .t-dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%; background: currentColor; vertical-align: middle; margin-right: .4em; position: relative; top: -.05em; }
   .j-what { color: #ecf0ec; }
   .j-extra { grid-column: 4; padding: 0 0 6px; white-space: pre-wrap; margin-top: -4px; }
   .j-gap { grid-column: 3; background: linear-gradient(#2c332c, #2c332c) center / 1px 100% no-repeat; }
@@ -276,7 +279,7 @@ function timeline(r, v) {
   const color = { ok: 't-ok', warn: 't-warn2', bad: 't-bad2', idle: 't-dim' };
   const row = (e, future) => `<div class="j-row ${future ? 'future' : ''}">
       <span class="j-when">${time(e.at)}</span><span class="j-rel">${rel(e.at, r.now)}</span>
-      <span class="j-mark"><i class="${color[e.tone]}">${future ? '○' : '●'}</i></span>
+      <span class="j-mark"><i class="j-dot ${future ? 'future' : ''} ${color[e.tone]}"></i></span>
       <span class="j-what"><span class="j-when-inline">${time(e.at)} · ${rel(e.at, r.now)}</span>${esc(e.what)}</span></div>
     ${e.extra ? `<span class="j-gap"></span><div class="j-extra">${e.extra}</div>` : ''}`;
   const future = ev.filter((e) => e.at > r.now), past = ev.filter((e) => e.at <= r.now);
@@ -300,7 +303,7 @@ function VariantF(r) {
   return `<div class="t-page"><div class="f-grid">
     <section class="f-side">
       <div class="t-prompt">$ briefly-searcher status</div>
-      <div class="t-status"><span class="${c}">●</span> loader — <span class="${c}">${esc(v.loader.title.toLowerCase())}</span></div>
+      <div class="t-status"><span class="t-dot ${c}"></span>loader — <span class="${c}">${esc(v.loader.title.toLowerCase())}</span></div>
       <div class="t-dim">${esc(v.loader.why)}</div>
       <div class="t-block"><div class="t-label">${hl.label}</div><div class="t-big">${hl.big}</div><div class="t-dim">${hl.sub}</div></div>
       <div class="t-block"><div class="t-label">raw_posts</div><div class="t-big">${id(r.raw_posts_count)}</div><div class="t-dim">сообщений сохранено</div></div>
@@ -316,7 +319,7 @@ function VariantG(r) {
   const v = derive(r), c = toneClass(v.loader.tone), hl = historyLines(r, v);
   return `<div class="t-page"><div class="g-box">
     <div class="t-prompt">$ briefly-searcher status · сводка на ${time(r.now)}</div>
-    <div class="t-status"><span class="${c}">●</span> briefly-searcher loader — <span class="${c}">${esc(v.loader.title.toLowerCase())}</span></div>
+    <div class="t-status"><span class="t-dot ${c}"></span>briefly-searcher loader — <span class="${c}">${esc(v.loader.title.toLowerCase())}</span></div>
     <div class="g-head">
       <span class="t-label">Состояние:</span><span class="t-dim">${esc(v.loader.why)}</span>
       <span class="t-label">${hl.label}:</span><span><b>${hl.big}</b> <span class="t-dim">— ${hl.sub}</span></span>
