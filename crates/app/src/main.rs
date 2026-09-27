@@ -3,7 +3,7 @@
 mod config;
 
 use anyhow::Context;
-use briefly_storage::Storage;
+use briefly_searcher_storage::Storage;
 use clap::{Parser, Subcommand};
 use envconfig::Envconfig;
 use tracing_subscriber::EnvFilter;

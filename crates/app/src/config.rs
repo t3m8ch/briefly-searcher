@@ -18,10 +18,10 @@ mod tests {
     fn reads_database_url() {
         let env = HashMap::from([(
             "DATABASE_URL".to_owned(),
-            "postgres://localhost/briefly".to_owned(),
+            "postgres://localhost/briefly_searcher".to_owned(),
         )]);
         let config = DatabaseConfig::init_from_hashmap(&env).unwrap();
-        assert_eq!(config.database_url, "postgres://localhost/briefly");
+        assert_eq!(config.database_url, "postgres://localhost/briefly_searcher");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-# briefly-searcher
+# Briefly Searcher
 
 Briefly Searcher — поиск по каналу @brieflyru. План — [docs/scraper-plan.md](docs/scraper-plan.md), глоссарий — [CONTEXT.md](CONTEXT.md).
 
@@ -6,14 +6,14 @@ Briefly Searcher — поиск по каналу @brieflyru. План — [docs
 
 - `crates/telegram` — доступ к Telegram;
 - `crates/storage` — PostgreSQL: схема, миграции и все SQL-запросы;
-- `crates/app` — бинарник `briefly` с командами.
+- `crates/app` — бинарник `briefly-searcher` с командами.
 
 ## Разработка
 
 Конфигурация — только переменные окружения; локально их удобно держать в `.env`: бинарник подхватывает его при запуске, уже заданные переменные окружения важнее файла. `.env` в Git не попадает.
 
 ```sh
-DATABASE_URL=postgres://postgres:postgres@localhost/briefly
+DATABASE_URL=postgres://postgres:postgres@localhost/briefly_searcher
 ```
 
 ```sh

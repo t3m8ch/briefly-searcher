@@ -131,11 +131,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "briefly"
+name = "briefly-searcher"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "briefly-storage",
+ "briefly-searcher-storage",
  "clap",
  "dotenvy",
  "envconfig",
@@ -145,7 +145,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "briefly-storage"
+name = "briefly-searcher-storage"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -156,7 +156,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "briefly-telegram"
+name = "briefly-searcher-telegram"
 version = "0.1.0"
 
 [[package]]

@@ -1,11 +1,11 @@
 [package]
-name = "briefly"
+name = "briefly-searcher"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-briefly-storage.workspace = true
+briefly-searcher-storage.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 dotenvy.workspace = true

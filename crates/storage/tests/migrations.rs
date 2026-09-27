@@ -1,4 +1,4 @@
-use briefly_storage::Storage;
+use briefly_searcher_storage::Storage;
 use sqlx::PgPool;
 
 /// Столбцы таблиц части 1: (таблица, столбец, тип, допускает NULL).
