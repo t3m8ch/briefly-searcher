@@ -38,6 +38,14 @@ pub enum HistoryError {
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
+impl HistoryError {
+    /// Прочая ошибка источника из любой ошибки или текста:
+    /// `.map_err(HistoryError::other)`, `HistoryError::other("…")`.
+    pub fn other(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+        Self::Other(error.into())
+    }
+}
+
 /// Источник истории канала: одна операция «страница блоков раньше `before`»,
 /// как `t.me/s/<канал>?before=<ID>` или `messages.getHistory` с `offset_id`.
 ///

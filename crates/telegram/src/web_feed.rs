@@ -92,7 +92,12 @@ impl HistorySource for WebFeed {
             None => self.feed_url.clone(),
             Some(before) => format!("{}?before={before}", self.feed_url),
         };
-        let response = self.client.get(&url).send().await.map_err(other)?;
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(HistoryError::other)?;
         let status = response.status();
         if status == StatusCode::TOO_MANY_REQUESTS {
             // Что лента сообщает при ограничении, неизвестно, поэтому
@@ -102,9 +107,11 @@ impl HistorySource for WebFeed {
             return Err(HistoryError::FloodWait(self.flood_wait_secs));
         }
         if status != StatusCode::OK {
-            return Err(other(format!("лента ответила {status} на {url}")));
+            return Err(HistoryError::other(format!(
+                "лента ответила {status} на {url}"
+            )));
         }
-        let body = response.text().await.map_err(other)?;
+        let body = response.text().await.map_err(HistoryError::other)?;
         let mut blocks = parse_blocks(&body, &self.channel)?;
         // Контракт «ID строго меньше `before`» держит сам источник, чтобы
         // загрузчик не зациклился, если лента вернёт блоки новее границы.
@@ -164,9 +171,10 @@ fn parse_blocks(body: &str, channel: &str) -> Result<Vec<Message>, HistoryError>
         .map(|block| {
             let post = block
                 .attr("data-post")
-                .ok_or_else(|| other("блок ленты без data-post"))?;
-            let id = block_id(post, channel)
-                .ok_or_else(|| other(format!("блок с неожиданным data-post=\"{post}\"")))?;
+                .ok_or_else(|| HistoryError::other("блок ленты без data-post"))?;
+            let id = block_id(post, channel).ok_or_else(|| {
+                HistoryError::other(format!("блок с неожиданным data-post=\"{post}\""))
+            })?;
             Ok(Message {
                 id,
                 payload: serde_json::json!({ "html": block.html() }),
@@ -175,7 +183,7 @@ fn parse_blocks(body: &str, channel: &str) -> Result<Vec<Message>, HistoryError>
         })
         .collect::<Result<Vec<_>, _>>()?;
     if blocks.is_empty() && document.select(&NO_MESSAGES_FOUND).next().is_none() {
-        return Err(other(
+        return Err(HistoryError::other(
             "в ответе ленты нет ни блоков, ни пометки начала канала",
         ));
     }
@@ -190,9 +198,4 @@ fn block_id(post: &str, channel: &str) -> Option<i64> {
         return None;
     }
     id.parse().ok().filter(|&id| id > 0)
-}
-
-/// Прочая ошибка источника.
-fn other(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HistoryError {
-    HistoryError::Other(error.into())
 }
