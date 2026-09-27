@@ -77,8 +77,8 @@ pub struct AdminSummary {
 
 /// Ключ session-level advisory-блокировки единственного экземпляра
 /// загрузчика. БД обслуживает одно приложение, поэтому ключ — просто
-/// константа: `"loader"` в ASCII.
-const LOADER_LOCK_KEY: i64 = 0x6c6f_6164_6572;
+/// константа: байты слова `loader`, дополненные нулями до 8 байт.
+const LOADER_LOCK_KEY: i64 = i64::from_be_bytes(*b"\0\0loader");
 
 /// Advisory-блокировка единственного экземпляра загрузчика.
 ///
