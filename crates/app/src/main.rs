@@ -115,14 +115,9 @@ async fn login() -> anyhow::Result<()> {
     let telegram = TelegramConfig::init_from_env()
         .context("не удалось прочитать конфигурацию из окружения")?;
     let storage = Storage::connect(&database.database_url).await?;
-    briefly_searcher_telegram::login(
-        storage,
-        telegram.api_id,
-        &telegram.api_hash,
-        &mut login::TerminalPrompt,
-    )
-    .await
-    .context("команда login")?;
+    briefly_searcher_telegram::login(storage, &telegram.credentials(), &mut login::TerminalPrompt)
+        .await
+        .context("команда login")?;
     tracing::info!("вход выполнен, сессия Telegram сохранена в БД");
     Ok(())
 }

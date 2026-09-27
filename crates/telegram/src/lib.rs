@@ -8,7 +8,7 @@ pub mod session;
 
 use std::future::Future;
 
-pub use login::{ApiHash, LoginError, LoginPrompt, login};
+pub use login::{ApiCredentials, LoginError, LoginPrompt, login};
 
 /// Наибольший размер страницы, который принимает `messages.getHistory`.
 pub const MAX_PAGE_SIZE: u32 = 100;

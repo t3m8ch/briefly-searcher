@@ -2,7 +2,7 @@
 
 use std::net::SocketAddr;
 
-use briefly_searcher_telegram::ApiHash;
+use briefly_searcher_telegram::ApiCredentials;
 use envconfig::Envconfig;
 
 /// Подключение к PostgreSQL — общая часть конфигурации всех команд.
@@ -22,13 +22,23 @@ pub struct WebConfig {
     pub addr: SocketAddr,
 }
 
-/// Приложение Telegram с my.telegram.org. `api_hash` — секрет, `Debug` его скрывает.
-#[derive(Debug, Envconfig)]
+/// Приложение Telegram с my.telegram.org. Секрет: без `Debug`, чтобы
+/// значения не попали в логи.
+#[derive(Envconfig)]
 pub struct TelegramConfig {
     #[envconfig(from = "TELEGRAM_API_ID")]
-    pub api_id: i32,
+    api_id: i32,
     #[envconfig(from = "TELEGRAM_API_HASH")]
-    pub api_hash: ApiHash,
+    api_hash: String,
+}
+
+impl TelegramConfig {
+    pub fn credentials(self) -> ApiCredentials {
+        ApiCredentials {
+            api_id: self.api_id,
+            api_hash: self.api_hash,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -74,7 +84,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_telegram_credentials_and_hides_api_hash_from_debug() {
+    fn reads_telegram_credentials_and_hides_them_from_debug() {
         let env = HashMap::from([
             ("TELEGRAM_API_ID".to_owned(), "123456".to_owned()),
             (
@@ -82,12 +92,14 @@ mod tests {
                 "0123456789abcdef0123456789abcdef".to_owned(),
             ),
         ]);
-        let config = TelegramConfig::init_from_hashmap(&env).unwrap();
+        let credentials = TelegramConfig::init_from_hashmap(&env)
+            .unwrap()
+            .credentials();
 
-        assert_eq!(config.api_id, 123456);
-        assert_eq!(config.api_hash.expose(), "0123456789abcdef0123456789abcdef");
-        let debug = format!("{config:?}");
-        assert!(!debug.contains("0123456789abcdef"), "{debug}");
+        assert_eq!(credentials.api_id, 123456);
+        assert_eq!(credentials.api_hash, "0123456789abcdef0123456789abcdef");
+        let debug = format!("{credentials:?}");
+        assert!(!debug.contains("123456"), "{debug}");
     }
 
     #[test]

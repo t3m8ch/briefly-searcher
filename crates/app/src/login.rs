@@ -44,5 +44,5 @@ fn ask(question: &str) -> io::Result<String> {
             "ввод закончился раньше, чем вход",
         ));
     }
-    Ok(answer)
+    Ok(answer.trim().to_owned())
 }

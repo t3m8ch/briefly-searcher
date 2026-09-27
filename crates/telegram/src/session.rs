@@ -23,8 +23,10 @@ pub enum SessionError {
     NotLoggedIn,
     #[error(transparent)]
     Storage(#[from] briefly_searcher_storage::Error),
-    #[error("сессия Telegram в БД повреждена: {0}")]
-    Corrupted(#[source] serde_json::Error),
+    /// Текст ошибки разбора не показывается: он может процитировать
+    /// фрагмент сессии.
+    #[error("сессия Telegram в БД повреждена")]
+    Corrupted,
     #[error("состояние сессии Telegram недоступно: поток, менявший его, упал")]
     Poisoned,
 }
@@ -46,7 +48,7 @@ impl DbSession {
             return Err(SessionError::NotLoggedIn);
         };
         let stored: StoredSession =
-            serde_json::from_slice(&bytes).map_err(SessionError::Corrupted)?;
+            serde_json::from_slice(&bytes).map_err(|_| SessionError::Corrupted)?;
         Ok(Self::new(storage, stored.into(), true))
     }
 

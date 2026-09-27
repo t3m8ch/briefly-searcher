@@ -1,8 +1,6 @@
 //! Вход в аккаунт Telegram: номер, код и при необходимости пароль 2FA.
 
-use std::convert::Infallible;
 use std::fmt;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use briefly_searcher_storage::Storage;
@@ -10,36 +8,26 @@ use grammers_client::{Client, InvocationError, SenderPool, SignInError};
 
 use crate::session::{DbSession, SessionError};
 
-/// `api_hash` приложения с my.telegram.org. Секрет: `Debug` его не показывает.
+/// Приложение Telegram с my.telegram.org. Секрет: `Debug` не показывает
+/// ни `api_id`, ни `api_hash`, чтобы они не попали в логи.
 #[derive(Clone)]
-pub struct ApiHash(String);
-
-impl ApiHash {
-    /// Значение для запроса к Telegram. Не выводить в логи.
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
+pub struct ApiCredentials {
+    pub api_id: i32,
+    pub api_hash: String,
 }
 
-impl FromStr for ApiHash {
-    type Err = Infallible;
-
-    fn from_str(value: &str) -> Result<Self, Infallible> {
-        Ok(Self(value.to_owned()))
-    }
-}
-
-impl fmt::Debug for ApiHash {
+impl fmt::Debug for ApiCredentials {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("ApiHash(<скрыт>)")
+        f.write_str("ApiCredentials(<скрыты>)")
     }
 }
 
 /// Ответы человека, который входит в аккаунт.
 pub trait LoginPrompt {
-    /// Номер телефона аккаунта в международном формате.
+    /// Номер телефона аккаунта в международном формате, без пробелов по краям.
     fn phone(&mut self) -> std::io::Result<String>;
-    /// Код входа, который Telegram прислал в приложение или по SMS.
+    /// Код входа, который Telegram прислал в приложение или по SMS, без
+    /// пробелов по краям.
     /// `retry` — предыдущий код был неверным.
     fn code(&mut self, retry: bool) -> std::io::Result<String>;
     /// Пароль двухэтапной проверки. `retry` — предыдущий пароль был неверным.
@@ -59,24 +47,33 @@ pub enum LoginError {
     Session(#[from] SessionError),
 }
 
+impl From<SignInError> for LoginError {
+    fn from(error: SignInError) -> Self {
+        match error {
+            SignInError::Other(error) => Self::Telegram(error),
+            error => Self::Rejected(Box::new(error)),
+        }
+    }
+}
+
 /// Проходит вход в аккаунт и сохраняет сессию в БД, заменяя прежнюю.
 ///
 /// Сессия попадает в БД только после успешного входа.
 pub async fn login(
     storage: Storage,
-    api_id: i32,
-    api_hash: &ApiHash,
+    credentials: &ApiCredentials,
     prompt: &mut impl LoginPrompt,
 ) -> Result<(), LoginError> {
     let session = Arc::new(DbSession::fresh(storage));
-    let SenderPool { runner, handle, .. } = SenderPool::new(Arc::clone(&session), api_id);
+    let SenderPool { runner, handle, .. } =
+        SenderPool::new(Arc::clone(&session), credentials.api_id);
     let client = Client::new(handle);
     let runner = tokio::spawn(runner.run());
 
-    let result = sign_in(&client, api_hash, prompt).await;
-    if result.is_ok() {
-        session.save().await?;
-    }
+    let result = match sign_in(&client, &credentials.api_hash, prompt).await {
+        Ok(()) => session.save().await.map_err(LoginError::from),
+        Err(error) => Err(error),
+    };
     client.disconnect();
     // Ошибка задачи соединений здесь уже ничего не меняет: вход завершён или
     // провалился раньше.
@@ -86,21 +83,18 @@ pub async fn login(
 
 async fn sign_in(
     client: &Client,
-    api_hash: &ApiHash,
+    api_hash: &str,
     prompt: &mut impl LoginPrompt,
 ) -> Result<(), LoginError> {
     let phone = prompt.phone()?;
-    let token = client
-        .request_login_code(phone.trim(), api_hash.expose())
-        .await?;
+    let token = client.request_login_code(&phone, api_hash).await?;
     let mut code = prompt.code(false)?;
     let mut password_token = loop {
-        match client.sign_in(&token, code.trim()).await {
+        match client.sign_in(&token, &code).await {
             Ok(_) => return Ok(()),
             Err(SignInError::InvalidCode) => code = prompt.code(true)?,
             Err(SignInError::PasswordRequired(password_token)) => break password_token,
-            Err(SignInError::Other(error)) => return Err(error.into()),
-            Err(error) => return Err(LoginError::Rejected(Box::new(error))),
+            Err(error) => return Err(error.into()),
         }
     };
     let mut retry = false;
@@ -112,8 +106,7 @@ async fn sign_in(
                 password_token = token;
                 retry = true;
             }
-            Err(SignInError::Other(error)) => return Err(error.into()),
-            Err(error) => return Err(LoginError::Rejected(Box::new(error))),
+            Err(error) => return Err(error.into()),
         }
     }
 }
