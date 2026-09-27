@@ -60,6 +60,13 @@ async fn serve_web() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("не удалось занять адрес {}", config.addr))?;
     tracing::info!(addr = %config.addr, "веб-админка: http://{}", config.addr);
+    if !config.addr.ip().is_loopback() {
+        // Проверка Host пропускает только localhost и loopback-адреса.
+        tracing::warn!(
+            addr = %config.addr,
+            "адрес не loopback, но админка отвечает только на запросы к localhost"
+        );
+    }
     web::serve(listener, storage, shutdown_signal())
         .await
         .context("веб-сервер")?;

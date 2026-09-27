@@ -40,6 +40,7 @@ pub enum Tone {
 }
 
 impl Tone {
+    /// CSS-класс цвета.
     pub fn class(self) -> &'static str {
         match self {
             Tone::Ok => "t-ok",
@@ -50,6 +51,7 @@ impl Tone {
     }
 }
 
+/// Состояние загрузчика: слово в заголовке и пояснение одной фразой.
 pub struct LoaderView {
     pub tone: Tone,
     pub title: &'static str,
@@ -91,6 +93,7 @@ impl HistoryView {
     }
 }
 
+/// Событие журнала: над линией «сейчас» — будущее, под ней — прошлое.
 pub struct Event {
     pub at: Moment,
     pub what: &'static str,
@@ -99,12 +102,14 @@ pub struct Event {
     pub note: Option<Note>,
 }
 
+/// Пояснение под событием: текст ошибки или «загрузчик молчит».
 pub struct Note {
     pub text: String,
     pub tone: Tone,
 }
 
 impl StatusView {
+    /// Выводит состояние загрузчика, строку истории и журнал из сводки.
     pub fn new(summary: &AdminSummary) -> Self {
         let now = summary.now;
         let pause_active = summary.flood_wait_until.is_some_and(|until| until > now);
@@ -152,30 +157,38 @@ impl StatusView {
 
         let mut events = Vec::new();
         if let Some(until) = summary.flood_wait_until.filter(|_| pause_active) {
-            events.push(RawEvent::new(
+            events.push(JournalEvent::new(
                 until,
                 "Закончится пауза Telegram (FLOOD_WAIT)",
                 Tone::Warn,
             ));
         }
         if let Some(at) = summary.next_attempt_at.filter(|_| error_current) {
-            events.push(RawEvent::new(at, "Следующая попытка запроса", Tone::Bad));
+            events.push(JournalEvent::new(
+                at,
+                "Следующая попытка запроса",
+                Tone::Bad,
+            ));
         }
         if let Some(at) = summary.last_heartbeat_at {
             events.push(if silent {
-                RawEvent {
+                JournalEvent {
                     note: Some(Note {
                         text: "с тех пор загрузчик молчит".to_owned(),
                         tone: Tone::Bad,
                     }),
-                    ..RawEvent::new(at, "Heartbeat загрузчика", Tone::Bad)
+                    ..JournalEvent::new(at, "Heartbeat загрузчика", Tone::Bad)
                 }
             } else {
-                RawEvent::new(at, "Heartbeat загрузчика", Tone::Ok)
+                JournalEvent::new(at, "Heartbeat загрузчика", Tone::Ok)
             });
         }
         if let Some(at) = summary.last_successful_request_at {
-            events.push(RawEvent::new(at, "Успешный запрос к Telegram", Tone::Ok));
+            events.push(JournalEvent::new(
+                at,
+                "Успешный запрос к Telegram",
+                Tone::Ok,
+            ));
         }
         if let (Some(error), Some(at)) = (&summary.last_error, summary.last_error_at) {
             let (what, tone) = if error_past {
@@ -183,19 +196,19 @@ impl StatusView {
             } else {
                 ("Ошибка", Tone::Bad)
             };
-            events.push(RawEvent {
+            events.push(JournalEvent {
                 note: Some(Note {
                     text: error.clone(),
                     tone,
                 }),
-                ..RawEvent::new(at, what, tone)
+                ..JournalEvent::new(at, what, tone)
             });
         }
 
         // Журнал от будущего к прошлому; линия «сейчас» делит его на две части.
         events.sort_by(|a, b| b.at.cmp(&a.at));
         let (future, past) = events.into_iter().partition(|event| event.at > now);
-        let into_view = |events: Vec<RawEvent>| {
+        let into_view = |events: Vec<JournalEvent>| {
             events
                 .into_iter()
                 .map(|event| Event {
@@ -226,15 +239,15 @@ impl StatusView {
     }
 }
 
-/// Событие журнала до форматирования времени.
-struct RawEvent {
+/// Событие журнала, пока время ещё не отформатировано относительно `now`.
+struct JournalEvent {
     at: DateTime<Utc>,
     what: &'static str,
     tone: Tone,
     note: Option<Note>,
 }
 
-impl RawEvent {
+impl JournalEvent {
     fn new(at: DateTime<Utc>, what: &'static str, tone: Tone) -> Self {
         Self {
             at,

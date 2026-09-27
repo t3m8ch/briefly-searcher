@@ -2,6 +2,7 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
+use axum::response::Response;
 use briefly_searcher::web;
 use briefly_searcher_storage::Storage;
 use http_body_util::BodyExt;
@@ -18,14 +19,21 @@ async fn get(pool: &PgPool, uri: &str) -> (StatusCode, String) {
 }
 
 async fn request(pool: &PgPool, request: axum::http::request::Builder) -> (StatusCode, String) {
-    let router = web::router(Storage::from_pool(pool.clone()));
-    let response = router
+    let response = send(pool, request).await;
+    let status = response.status();
+    (status, body_text(response).await)
+}
+
+async fn send(pool: &PgPool, request: axum::http::request::Builder) -> Response {
+    web::router(Storage::from_pool(pool.clone()))
         .oneshot(request.body(Body::empty()).unwrap())
         .await
-        .unwrap();
-    let status = response.status();
+        .unwrap()
+}
+
+async fn body_text(response: Response) -> String {
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    (status, String::from_utf8(body.to_vec()).unwrap())
+    String::from_utf8(body.to_vec()).unwrap()
 }
 
 #[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
@@ -263,25 +271,18 @@ async fn page_contains_summary_and_polls_status(pool: PgPool) {
 
 #[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
 async fn server_serves_its_own_htmx(pool: PgPool) {
-    let router = web::router(Storage::from_pool(pool));
-    let response = router
-        .oneshot(
-            Request::get("/htmx.min.js")
-                .header(header::HOST, "localhost:3000")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = send(
+        &pool,
+        Request::get("/htmx.min.js").header(header::HOST, "localhost:3000"),
+    )
+    .await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers()[header::CONTENT_TYPE],
         "text/javascript; charset=utf-8"
     );
-    let body = response.into_body().collect().await.unwrap().to_bytes();
-    let body = String::from_utf8(body.to_vec()).unwrap();
-    assert!(body.contains(r#"version:"2.0.11""#));
+    assert!(body_text(response).await.contains(r#"version:"2.0.11""#));
 }
 
 #[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]

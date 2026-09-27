@@ -63,11 +63,15 @@ pub struct AdminSummary {
     pub raw_posts_count: i64,
     /// Срок паузы после `FLOOD_WAIT`; может быть уже в прошлом.
     pub flood_wait_until: Option<DateTime<Utc>>,
+    /// Последний успешный запрос к Telegram.
     pub last_successful_request_at: Option<DateTime<Utc>>,
+    /// Последний heartbeat основного цикла загрузчика.
     pub last_heartbeat_at: Option<DateTime<Utc>>,
     /// Последняя ошибка загрузчика; после успешных запросов не очищается.
     pub last_error: Option<String>,
+    /// Когда случилась последняя ошибка.
     pub last_error_at: Option<DateTime<Utc>>,
+    /// Когда загрузчик повторит попытку после ошибки.
     pub next_attempt_at: Option<DateTime<Utc>>,
 }
 

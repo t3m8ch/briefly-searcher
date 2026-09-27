@@ -3,6 +3,9 @@
 
 mod view;
 
+use std::net::IpAddr;
+use std::time::Duration;
+
 use askama::Template;
 use axum::Router;
 use axum::extract::{Request, State};
@@ -11,10 +14,6 @@ use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use briefly_searcher_storage::Storage;
-
-use std::net::IpAddr;
-use std::time::Duration;
-
 use tokio::net::TcpListener;
 use tower_http::timeout::TimeoutLayer;
 
@@ -68,20 +67,25 @@ struct StatusFragment {
 }
 
 async fn page(State(storage): State<Storage>) -> Response {
-    match storage.admin_summary().await {
-        Ok(summary) => render(Page {
-            s: StatusView::new(&summary),
-        }),
-        Err(error) => unavailable(error),
-    }
+    summary_view(&storage)
+        .await
+        .map_or_else(|response| response, |s| render(Page { s }))
 }
 
 async fn status(State(storage): State<Storage>) -> Response {
+    summary_view(&storage)
+        .await
+        .map_or_else(|response| response, |s| render(StatusFragment { s }))
+}
+
+/// Сводка для шаблона; при ошибке хранилища — готовый ответ 5xx.
+async fn summary_view(storage: &Storage) -> Result<StatusView, Response> {
     match storage.admin_summary().await {
-        Ok(summary) => render(StatusFragment {
-            s: StatusView::new(&summary),
-        }),
-        Err(error) => unavailable(error),
+        Ok(summary) => Ok(StatusView::new(&summary)),
+        Err(error) => {
+            tracing::error!(%error, "не удалось прочитать сводку для админки");
+            Err(unavailable())
+        }
     }
 }
 
@@ -131,12 +135,14 @@ fn is_loopback_host(host: &str) -> bool {
 fn render(template: impl Template) -> Response {
     match template.render() {
         Ok(html) => Html(html).into_response(),
-        Err(error) => unavailable(error),
+        Err(error) => {
+            tracing::error!(%error, "не удалось отрендерить шаблон админки");
+            unavailable()
+        }
     }
 }
 
 /// Ответ 5xx: HTMX 2 его не вставляет, и на экране остаются последние данные.
-fn unavailable(error: impl std::fmt::Display) -> Response {
-    tracing::error!(%error, "сводка для админки недоступна");
+fn unavailable() -> Response {
     (StatusCode::INTERNAL_SERVER_ERROR, "сводка недоступна").into_response()
 }
