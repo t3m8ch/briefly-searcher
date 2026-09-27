@@ -67,8 +67,10 @@
     htmx 2 не вставляет, поэтому на экране остаются последние данные.
     settle:0ms: htmx:load (перевод времени из UTC) срабатывает сразу после
     вставки, до отрисовки кадра; с задержкой по умолчанию (20 мс) времена
-    мелькали в UTC, а журнал сдвигался. -#}
-<main class="box" id="status" hx-get="/status" hx-trigger="every 5s" hx-swap="innerHTML settle:0ms">
+    мелькали в UTC, а журнал сдвигался.
+    [nothingSelected()]: пока выделен текст, опрос пропускается — замена блока
+    сбросила бы выделение; после снятия выделения обновление продолжается. -#}
+<main class="box" id="status" hx-get="/status" hx-trigger="every 5s [nothingSelected()]" hx-swap="innerHTML settle:0ms">
 {%- block status %}
 <div class="t-prompt">$ briefly-searcher status · сводка на {% call moment(s.now) %}{% endcall %}</div>
 <div class="t-status"><span class="t-dot {{ s.loader.tone.class() }}"></span>briefly-searcher loader — <span class="{{ s.loader.tone.class() }}">{{ s.loader.title }}</span></div>
@@ -95,8 +97,16 @@
 </main>
 <script src="/htmx.min.js"></script>
 <script>
-  // Единственный собственный скрипт: переводит времена из UTC в пояс браузера,
-  // при загрузке страницы и после каждого обновления /status. Без JS видно UTC.
+  // Единственный собственный скрипт. Без JS страница тоже работает: видно UTC,
+  // но обновления не будет — его делает htmx.
+
+  // Условие опроса /status: на странице ничего не выделено.
+  function nothingSelected() {
+    return document.getSelection().isCollapsed;
+  }
+
+  // Переводит времена из UTC в пояс браузера при загрузке страницы
+  // и после каждого обновления /status.
   htmx.onLoad(function (root) {
     root.querySelectorAll('time[datetime]').forEach(function (el) {
       el.textContent = new Date(el.dateTime).toLocaleString('ru-RU', {

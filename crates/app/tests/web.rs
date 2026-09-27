@@ -257,7 +257,12 @@ async fn page_contains_summary_and_polls_status(pool: PgPool) {
         "{body}"
     );
     assert!(body.contains(r#"hx-get="/status""#), "{body}");
-    assert!(body.contains(r#"hx-trigger="every 5s""#), "{body}");
+    // Пока на странице выделен текст, опрос пропускается, чтобы не сбросить выделение.
+    assert!(
+        body.contains(r#"hx-trigger="every 5s [nothingSelected()]""#),
+        "{body}"
+    );
+    assert!(body.contains("function nothingSelected()"), "{body}");
     // Settle без задержки: время переводится в пояс браузера до отрисовки кадра.
     assert!(body.contains(r#"hx-swap="innerHTML settle:0ms""#), "{body}");
     assert!(
