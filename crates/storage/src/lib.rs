@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use sqlx::migrate::{MigrateError, Migrator};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Connection, PgConnection, PgPool, Postgres, Transaction};
 
 /// Миграции, вшитые в бинарник. Открыты для тестов других crates:
 /// `#[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]`.
@@ -75,6 +75,37 @@ pub struct AdminSummary {
     pub next_attempt_at: Option<DateTime<Utc>>,
 }
 
+/// Ключ session-level advisory-блокировки единственного экземпляра
+/// загрузчика. БД обслуживает одно приложение, поэтому ключ — просто
+/// константа: `"loader"` в ASCII.
+const LOADER_LOCK_KEY: i64 = 0x6c6f_6164_6572;
+
+/// Advisory-блокировка единственного экземпляра загрузчика.
+///
+/// Держится на выделенном соединении, а не на соединении из пула: пул может
+/// закрыть или пересоздать своё соединение, и блокировка бы молча пропала.
+/// Если процесс падает, PostgreSQL снимает блокировку вместе с сессией.
+#[derive(Debug)]
+pub struct LoaderLock {
+    connection: PgConnection,
+}
+
+impl LoaderLock {
+    /// Снимает блокировку и закрывает её соединение. Блокировку можно и
+    /// просто уронить, но тогда PostgreSQL снимет её не сразу, а когда
+    /// заметит закрытие соединения.
+    pub async fn release(mut self) -> Result<(), Error> {
+        sqlx::query_scalar!(
+            r#"SELECT pg_advisory_unlock($1) AS "unlocked!""#,
+            LOADER_LOCK_KEY
+        )
+        .fetch_one(&mut self.connection)
+        .await?;
+        self.connection.close().await?;
+        Ok(())
+    }
+}
+
 /// Пул соединений с PostgreSQL.
 #[derive(Clone, Debug)]
 pub struct Storage {
@@ -102,6 +133,27 @@ impl Storage {
     pub async fn migrate(&self) -> Result<(), Error> {
         MIGRATOR.run(&self.pool).await?;
         Ok(())
+    }
+
+    /// Берёт блокировку единственного экземпляра загрузчика на отдельном
+    /// соединении с теми же параметрами, что и у пула. `None` — если её
+    /// держит другой экземпляр.
+    pub async fn try_lock_loader(&self) -> Result<Option<LoaderLock>, Error> {
+        let mut connection = PgConnection::connect_with(&self.pool.connect_options())
+            .await
+            .map_err(Error::Connect)?;
+        let locked = sqlx::query_scalar!(
+            r#"SELECT pg_try_advisory_lock($1) AS "locked!""#,
+            LOADER_LOCK_KEY
+        )
+        .fetch_one(&mut connection)
+        .await?;
+        if locked {
+            Ok(Some(LoaderLock { connection }))
+        } else {
+            connection.close().await?;
+            Ok(None)
+        }
     }
 
     /// Выводит состояние прохода из сохранённых данных.
