@@ -184,7 +184,8 @@ impl Storage {
         Ok(state)
     }
 
-    /// Сохраняет страницу прохода одной транзакцией.
+    /// Сохраняет страницу прохода одной транзакцией и возвращает, сколько
+    /// сообщений записано впервые.
     ///
     /// Уже сохранённые сообщения не переписываются: остаётся впервые
     /// сохранённый `payload`.
@@ -192,29 +193,30 @@ impl Storage {
         &self,
         page: &[RawMessage<'_>],
         fetched_at: DateTime<Utc>,
-    ) -> Result<(), Error> {
+    ) -> Result<u64, Error> {
         let mut tx = self.pool.begin().await?;
-        insert_raw_messages(&mut tx, page, fetched_at).await?;
+        let saved = insert_raw_messages(&mut tx, page, fetched_at).await?;
         tx.commit().await?;
-        Ok(())
+        Ok(saved)
     }
 
     /// Сохраняет последнюю страницу прохода и в той же транзакции сдвигает
-    /// `newest_fetched_id` на наибольший сохранённый `message_id`.
+    /// `newest_fetched_id` на наибольший сохранённый `message_id`. Возвращает,
+    /// сколько сообщений страницы записано впервые.
     pub async fn finish_pass(
         &self,
         last_page: &[RawMessage<'_>],
         fetched_at: DateTime<Utc>,
-    ) -> Result<(), Error> {
+    ) -> Result<u64, Error> {
         let mut tx = self.pool.begin().await?;
-        insert_raw_messages(&mut tx, last_page, fetched_at).await?;
+        let saved = insert_raw_messages(&mut tx, last_page, fetched_at).await?;
         sqlx::query!(
             "UPDATE ingestion_state SET newest_fetched_id = (SELECT max(message_id) FROM raw_posts)"
         )
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok(())
+        Ok(saved)
     }
 
     /// Собирает сводку для веб-админки.
@@ -247,13 +249,15 @@ impl Storage {
     }
 }
 
+/// Вставляет сообщения без перезаписи и возвращает, сколько из них новые.
 async fn insert_raw_messages(
     tx: &mut Transaction<'_, Postgres>,
     messages: &[RawMessage<'_>],
     fetched_at: DateTime<Utc>,
-) -> Result<(), Error> {
+) -> Result<u64, Error> {
+    let mut inserted = 0;
     for message in messages {
-        sqlx::query!(
+        inserted += sqlx::query!(
             "INSERT INTO raw_posts (message_id, payload, payload_schema, fetched_at)
              VALUES ($1, $2, $3, $4)
              ON CONFLICT (message_id) DO NOTHING",
@@ -263,7 +267,8 @@ async fn insert_raw_messages(
             fetched_at,
         )
         .execute(&mut **tx)
-        .await?;
+        .await?
+        .rows_affected();
     }
-    Ok(())
+    Ok(inserted)
 }

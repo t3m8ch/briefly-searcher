@@ -294,6 +294,21 @@ async fn next_pass_saves_two_pages_of_new_messages_and_stops_at_saved_ones(pool:
 }
 
 #[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
+async fn pass_reports_only_blocks_it_saved(pool: PgPool) {
+    let clock = FakeClock::new();
+    let channel = FakeChannel::new(&clock);
+    channel.publish(1..=9);
+    let mut loader = loader(&pool, &channel, &clock);
+    assert_eq!(loader.run_pass().await.unwrap(), 9);
+
+    channel.publish(10..=14);
+    // 14 13 12 | 11 10 9 — уже сохранённое 9 не считается.
+    assert_eq!(loader.run_pass().await.unwrap(), 5);
+    // Новых сообщений нет: 14 13 12 уже сохранены.
+    assert_eq!(loader.run_pass().await.unwrap(), 0);
+}
+
+#[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
 async fn interruption_before_last_page_commit_is_finished_by_next_run(pool: PgPool) {
     let clock = FakeClock::new();
     let channel = FakeChannel::new(&clock);
