@@ -7,11 +7,10 @@ mod support;
 use briefly_searcher::clock::SystemClock;
 use briefly_searcher::loader::{Loader, Settings};
 use briefly_searcher_storage::Storage;
-use briefly_searcher_telegram::{WebFeed, WebFeedSettings};
 use chrono::TimeDelta;
 use sqlx::PgPool;
 
-use support::{CHANNEL, FeedServer, Reply, fixtures};
+use support::{FeedServer, Reply, fixtures};
 
 #[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
 async fn first_pass_walks_recorded_start_of_channel_down_to_empty_page(pool: PgPool) {
@@ -22,12 +21,6 @@ async fn first_pass_walks_recorded_start_of_channel_down_to_empty_page(pool: PgP
         (Some(1), Reply::page(fixtures::BEFORE_1)),
     ])
     .await;
-    let source = WebFeed::new(WebFeedSettings {
-        base_url: server.base_url(),
-        channel: CHANNEL.to_owned(),
-        flood_wait_secs: 60,
-    })
-    .unwrap();
     let settings = Settings {
         page_size: 100,
         request_delay: TimeDelta::zero(),
@@ -35,7 +28,7 @@ async fn first_pass_walks_recorded_start_of_channel_down_to_empty_page(pool: PgP
     };
     let mut loader = Loader::new(
         Storage::from_pool(pool.clone()),
-        source,
+        server.source(),
         SystemClock,
         settings,
     );

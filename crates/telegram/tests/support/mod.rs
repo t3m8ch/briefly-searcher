@@ -16,9 +16,13 @@ use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use briefly_searcher_telegram::{WebFeed, WebFeedSettings};
 
 /// Канал, ленту которого изображает сервер.
 pub const CHANNEL: &str = "brieflyru";
+
+/// Пауза при `429`, которую тесты передают источнику.
+pub const FLOOD_WAIT_SECS: u32 = 60;
 
 /// Страницы `t.me/s/brieflyru?before=<N>`, записанные 27.09.2026.
 pub mod fixtures {
@@ -116,6 +120,16 @@ impl FeedServer {
     /// Базовый адрес для источника, как `https://t.me` в работе.
     pub fn base_url(&self) -> String {
         format!("http://{}", self.addr)
+    }
+
+    /// Источник на веб-ленте этого сервера.
+    pub fn source(&self) -> WebFeed {
+        WebFeed::new(WebFeedSettings {
+            base_url: self.base_url(),
+            channel: CHANNEL.to_owned(),
+            flood_wait_secs: FLOOD_WAIT_SECS,
+        })
+        .unwrap()
     }
 
     /// Строки запроса всех обращений к ленте по порядку.

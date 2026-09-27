@@ -8,9 +8,9 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use axum::http::StatusCode;
-use briefly_searcher_telegram::{HistorySource, WebFeed, WebFeedSettings};
+use briefly_searcher_telegram::HistorySource;
 
-use support::{CHANNEL, FeedServer, Reply};
+use support::{FeedServer, Reply};
 
 /// Логи `tracing`, записанные в память.
 #[derive(Clone, Default)]
@@ -60,15 +60,7 @@ async fn too_many_requests_response_is_logged_as_warning_with_headers_and_body_s
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
 
-    WebFeed::new(WebFeedSettings {
-        base_url: server.base_url(),
-        channel: CHANNEL.to_owned(),
-        flood_wait_secs: 60,
-    })
-    .unwrap()
-    .fetch_page(100, 100)
-    .await
-    .unwrap_err();
+    server.source().fetch_page(100, 100).await.unwrap_err();
 
     let logs = logs.text();
     let line = logs

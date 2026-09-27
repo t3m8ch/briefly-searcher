@@ -20,11 +20,12 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Сколько байт тела ответа `429` писать в лог.
 const LOGGED_BODY_LIMIT: usize = 2048;
 
+/// Собственный `User-Agent`: название и версия приложения.
 const USER_AGENT: &str = concat!("briefly-searcher/", env!("CARGO_PKG_VERSION"));
 
 /// **Блок веб-ленты**: отдельное сообщение или целый альбом.
 static BLOCK: LazyLock<Selector> =
-    LazyLock::new(|| Selector::parse(".tgme_widget_message[data-post]").unwrap());
+    LazyLock::new(|| Selector::parse(".tgme_widget_message").unwrap());
 
 /// Пометка пустой ленты: так лента показывает, что раньше блоков нет.
 static NO_MESSAGES_FOUND: LazyLock<Selector> =
@@ -53,6 +54,9 @@ pub struct WebFeed {
 }
 
 impl WebFeed {
+    /// Создаёт источник с HTTP-клиентом на rustls: таймаут запроса 30 с,
+    /// без перехода по редиректам.
+    ///
     /// # Errors
     ///
     /// Если не удалось создать HTTP-клиент.
@@ -118,13 +122,13 @@ async fn log_too_many_requests(url: &str, response: reqwest::Response) {
     let headers = response.headers().clone();
     match response.bytes().await {
         Ok(body) => {
-            let body = String::from_utf8_lossy(&body);
+            let text = String::from_utf8_lossy(&body);
             tracing::warn!(
                 url,
                 status,
                 ?headers,
                 body_len = body.len(),
-                body_start = prefix(&body, LOGGED_BODY_LIMIT),
+                body_start = prefix(&text, LOGGED_BODY_LIMIT),
                 "лента ограничила частоту запросов"
             );
         }
@@ -155,7 +159,9 @@ fn parse_blocks(body: &str, channel: &str) -> Result<Vec<Message>, HistoryError>
     let blocks = document
         .select(&BLOCK)
         .map(|block| {
-            let post = block.attr("data-post").unwrap_or_default();
+            let post = block
+                .attr("data-post")
+                .ok_or_else(|| other("блок ленты без data-post"))?;
             let id = block_id(post, channel)
                 .ok_or_else(|| other(format!("блок с неожиданным data-post=\"{post}\"")))?;
             Ok(Message {
@@ -183,6 +189,7 @@ fn block_id(post: &str, channel: &str) -> Option<i64> {
     id.parse().ok().filter(|&id| id > 0)
 }
 
+/// Прочая ошибка источника.
 fn other(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HistoryError {
     HistoryError::Other(error.into())
 }
