@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT newest_fetched_id FROM ingestion_state",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "newest_fetched_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ingestion_state",
+            "name": "newest_fetched_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "ebf7e8ee0861dcd2be561d58c5d57f93f2a12da299e51f5305dce44d0c5308c6"
+}

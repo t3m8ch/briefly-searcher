@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT payload, payload_schema FROM raw_posts WHERE message_id = 5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "raw_posts",
+            "name": "payload"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "payload_schema",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "raw_posts",
+            "name": "payload_schema"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "41291ad5479f0eef89799984324ac287ae73d1808b76980ff4952e077f9f55b5"
+}

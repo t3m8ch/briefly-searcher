@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT message_id FROM raw_posts ORDER BY message_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "message_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "raw_posts",
+            "name": "message_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c8199ff517d759735b15627b857d4dbac9f84e9524125d782c6496f82310db60"
+}
