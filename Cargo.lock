@@ -137,7 +137,8 @@ dependencies = [
  "anyhow",
  "briefly-storage",
  "clap",
- "thiserror",
+ "dotenvy",
+ "envconfig",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -393,6 +394,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "envconfig"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2934d78aeb06e54961db5b96cfca2b01f5cb01cf11c34f7b088932fd48233ac6"
+dependencies = [
+ "envconfig_derive",
+]
+
+[[package]]
+name = "envconfig_derive"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "452c458dfb890a2fea64e4c894f83daad61689fb9bbe84c382e1ce6d7536710b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
