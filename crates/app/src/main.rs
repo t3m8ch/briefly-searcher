@@ -1,6 +1,7 @@
 //! Бинарник Briefly Searcher: разовые административные команды и долгоживущие процессы.
 
 mod config;
+mod login;
 
 use anyhow::Context;
 use briefly_searcher::web;
@@ -9,7 +10,7 @@ use clap::{Parser, Subcommand};
 use envconfig::Envconfig;
 use tracing_subscriber::EnvFilter;
 
-use crate::config::{DatabaseConfig, WebConfig};
+use crate::config::{DatabaseConfig, TelegramConfig, WebConfig};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -24,6 +25,8 @@ enum Command {
     Migrate,
     /// Запустить веб-админку только для чтения на WEB_ADDR (по умолчанию 127.0.0.1:3000).
     Web,
+    /// Войти в аккаунт Telegram (номер, код, пароль 2FA) и сохранить сессию в БД.
+    Login,
 }
 
 #[tokio::main]
@@ -39,6 +42,7 @@ async fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Migrate => migrate().await,
         Command::Web => serve_web().await,
+        Command::Login => login().await,
     }
 }
 
@@ -103,6 +107,19 @@ async fn shutdown_signal() {
         () = terminate => {}
     }
     tracing::info!("получен сигнал остановки, дорабатываю текущие запросы");
+}
+
+async fn login() -> anyhow::Result<()> {
+    let database = DatabaseConfig::init_from_env()
+        .context("не удалось прочитать конфигурацию из окружения")?;
+    let telegram = TelegramConfig::init_from_env()
+        .context("не удалось прочитать конфигурацию из окружения")?;
+    let storage = Storage::connect(&database.database_url).await?;
+    briefly_searcher_telegram::login(storage, &telegram.credentials(), &mut login::TerminalPrompt)
+        .await
+        .context("команда login")?;
+    tracing::info!("вход выполнен, сессия Telegram сохранена в БД");
+    Ok(())
 }
 
 /// Подгружает локальный `.env`, если он есть: удобство разработки.

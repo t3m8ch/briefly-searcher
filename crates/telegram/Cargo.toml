@@ -5,5 +5,13 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+briefly-searcher-storage.workspace = true
+grammers-client.workspace = true
+grammers-session.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+sqlx.workspace = true

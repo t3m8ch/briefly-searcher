@@ -1,9 +1,14 @@
 //! Доступ к Telegram: MTProto-клиент `grammers` и trait `HistorySource`.
 //!
 //! Crate не обращается к БД: сессию Telegram он читает и сохраняет через
-//! crate хранилища. Реализация на `grammers` появится вместе с командой `login`.
+//! crate хранилища.
+
+pub mod login;
+pub mod session;
 
 use std::future::Future;
+
+pub use login::{ApiCredentials, LoginError, LoginPrompt, login};
 
 /// Наибольший размер страницы, который принимает `messages.getHistory`.
 pub const MAX_PAGE_SIZE: u32 = 100;
