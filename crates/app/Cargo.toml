@@ -6,10 +6,17 @@ publish.workspace = true
 
 [dependencies]
 briefly-searcher-storage.workspace = true
+briefly-searcher-telegram.workspace = true
 anyhow.workspace = true
+chrono.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 envconfig.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+sqlx.workspace = true

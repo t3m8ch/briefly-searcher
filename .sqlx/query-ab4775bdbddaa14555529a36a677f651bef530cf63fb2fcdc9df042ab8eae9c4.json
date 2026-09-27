@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                s.newest_fetched_id,\n                (\n                    SELECT min(p.message_id)\n                    FROM raw_posts p\n                    WHERE p.message_id > COALESCE(s.newest_fetched_id, 0)\n                ) AS resume_offset_id\n            FROM ingestion_state s\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "newest_fetched_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ingestion_state",
+            "name": "newest_fetched_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "resume_offset_id",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "ab4775bdbddaa14555529a36a677f651bef530cf63fb2fcdc9df042ab8eae9c4"
+}

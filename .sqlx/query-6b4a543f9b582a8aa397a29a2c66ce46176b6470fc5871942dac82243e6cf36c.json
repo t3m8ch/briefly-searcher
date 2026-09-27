@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO raw_posts (message_id, payload, payload_schema, fetched_at)\n             VALUES ($1, $2, $3, $4)\n             ON CONFLICT (message_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Jsonb",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6b4a543f9b582a8aa397a29a2c66ce46176b6470fc5871942dac82243e6cf36c"
+}

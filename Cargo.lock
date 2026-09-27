@@ -136,9 +136,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "briefly-searcher-storage",
+ "briefly-searcher-telegram",
+ "chrono",
  "clap",
  "dotenvy",
  "envconfig",
+ "serde_json",
+ "sqlx",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -158,6 +163,10 @@ dependencies = [
 [[package]]
 name = "briefly-searcher-telegram"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "bumpalo"
