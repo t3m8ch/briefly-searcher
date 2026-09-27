@@ -77,9 +77,9 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
     /// ошибкой, следующий вызов продолжит его с первой несохранённой страницы.
     pub async fn run_pass(&mut self) -> Result<(), Error> {
         let state = self.storage.pass_state().await?;
-        let mut offset_id = state.resume_offset_id.unwrap_or(0);
+        let mut before = state.resume_before;
         loop {
-            let page = self.fetch_page(offset_id).await?;
+            let page = self.fetch_page(before).await?;
             let messages: Vec<_> = page.iter().map(raw_message).collect();
             let fetched_at = self.clock.now();
             // Проход завершается на пустой странице (начало канала) или на
@@ -87,7 +87,7 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
             match page.iter().map(|m| m.id).min() {
                 Some(min_id) if state.newest_fetched_id.is_none_or(|newest| min_id > newest) => {
                     self.storage.save_page(&messages, fetched_at).await?;
-                    offset_id = min_id;
+                    before = Some(min_id);
                 }
                 _ => {
                     self.storage.finish_pass(&messages, fetched_at).await?;
@@ -99,7 +99,7 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
 
     /// Запрашивает страницу не раньше чем через `request_delay` после ответа
     /// на предыдущий запрос.
-    async fn fetch_page(&mut self, offset_id: i64) -> Result<Vec<Message>, HistoryError> {
+    async fn fetch_page(&mut self, before: Option<i64>) -> Result<Vec<Message>, HistoryError> {
         if let Some(last) = self.last_request_at {
             self.clock
                 .sleep_until(last + self.settings.request_delay)
@@ -107,7 +107,7 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
         }
         let page = self
             .source
-            .fetch_page(offset_id, self.settings.page_size)
+            .fetch_page(before, self.settings.page_size)
             .await;
         self.last_request_at = Some(self.clock.now());
         page

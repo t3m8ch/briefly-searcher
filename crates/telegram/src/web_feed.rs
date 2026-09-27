@@ -83,11 +83,14 @@ impl WebFeed {
 }
 
 impl HistorySource for WebFeed {
-    async fn fetch_page(&self, offset_id: i64, limit: u32) -> Result<Vec<Message>, HistoryError> {
-        let url = if offset_id == 0 {
-            self.feed_url.clone()
-        } else {
-            format!("{}?before={offset_id}", self.feed_url)
+    async fn fetch_page(
+        &self,
+        before: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<Message>, HistoryError> {
+        let url = match before {
+            None => self.feed_url.clone(),
+            Some(before) => format!("{}?before={before}", self.feed_url),
         };
         let response = self.client.get(&url).send().await.map_err(other)?;
         let status = response.status();
@@ -103,10 +106,10 @@ impl HistorySource for WebFeed {
         }
         let body = response.text().await.map_err(other)?;
         let mut blocks = parse_blocks(&body, &self.channel)?;
-        // Контракт «ID строго меньше `offset_id`» держит сам источник, чтобы
+        // Контракт «ID строго меньше `before`» держит сам источник, чтобы
         // загрузчик не зациклился, если лента вернёт блоки новее границы.
-        if offset_id != 0 {
-            blocks.retain(|block| block.id < offset_id);
+        if let Some(before) = before {
+            blocks.retain(|block| block.id < before);
         }
         // В разметке блоки идут по возрастанию ID, отдаём от свежих к ранним.
         blocks.sort_by_key(|block| std::cmp::Reverse(block.id));

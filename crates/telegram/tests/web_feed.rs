@@ -21,7 +21,7 @@ fn html(message: &Message) -> &str {
 async fn page_returns_blocks_newest_first_with_block_html() {
     let server = FeedServer::start([(Some(47107), Reply::page(fixtures::BEFORE_47107))]).await;
 
-    let page = server.source().fetch_page(47107, 100).await.unwrap();
+    let page = server.source().fetch_page(Some(47107), 100).await.unwrap();
 
     assert_eq!(
         ids(&page),
@@ -50,7 +50,7 @@ async fn page_returns_blocks_newest_first_with_block_html() {
 async fn album_is_one_record_with_first_photo_id_and_all_photo_ids_in_html() {
     let server = FeedServer::start([(Some(31170), Reply::page(fixtures::BEFORE_31170))]).await;
 
-    let page = server.source().fetch_page(31170, 100).await.unwrap();
+    let page = server.source().fetch_page(Some(31170), 100).await.unwrap();
 
     assert_eq!(ids(&page), [31162, 31160, 31157, 31148]);
     let album = &page[3];
@@ -61,11 +61,11 @@ async fn album_is_one_record_with_first_photo_id_and_all_photo_ids_in_html() {
 }
 
 #[tokio::test]
-async fn blocks_not_older_than_offset_id_are_dropped() {
+async fn blocks_not_older_than_before_are_dropped() {
     // Лента вернула на `before=47100` страницу, где есть блоки 47100–47106.
     let server = FeedServer::start([(Some(47100), Reply::page(fixtures::BEFORE_47107))]).await;
 
-    let page = server.source().fetch_page(47100, 100).await.unwrap();
+    let page = server.source().fetch_page(Some(47100), 100).await.unwrap();
 
     assert_eq!(
         ids(&page),
@@ -76,10 +76,10 @@ async fn blocks_not_older_than_offset_id_are_dropped() {
 }
 
 #[tokio::test]
-async fn zero_offset_id_requests_feed_without_before() {
+async fn no_bound_requests_feed_without_before() {
     let server = FeedServer::start([(None, Reply::page(fixtures::BEFORE_47107))]).await;
 
-    let page = server.source().fetch_page(0, 100).await.unwrap();
+    let page = server.source().fetch_page(None, 100).await.unwrap();
 
     assert_eq!(page.len(), 14);
     assert_eq!(page[0].id, 47106);
@@ -90,7 +90,7 @@ async fn zero_offset_id_requests_feed_without_before() {
 async fn limit_keeps_only_newest_blocks() {
     let server = FeedServer::start([(Some(30), Reply::page(fixtures::BEFORE_30))]).await;
 
-    let page = server.source().fetch_page(30, 3).await.unwrap();
+    let page = server.source().fetch_page(Some(30), 3).await.unwrap();
 
     assert_eq!(ids(&page), [29, 28, 27]);
 }
@@ -105,11 +105,14 @@ async fn start_of_channel_pages_end_with_empty_page() {
     .await;
     let source = server.source();
 
-    assert_eq!(ids(&source.fetch_page(10, 100).await.unwrap()), [9, 8, 1]);
-    let first = source.fetch_page(5, 100).await.unwrap();
+    assert_eq!(
+        ids(&source.fetch_page(Some(10), 100).await.unwrap()),
+        [9, 8, 1]
+    );
+    let first = source.fetch_page(Some(5), 100).await.unwrap();
     assert_eq!(ids(&first), [1]);
     assert!(html(&first[0]).contains("Channel created"));
-    assert_eq!(source.fetch_page(1, 100).await.unwrap(), []);
+    assert_eq!(source.fetch_page(Some(1), 100).await.unwrap(), []);
 }
 
 #[tokio::test]
@@ -123,8 +126,8 @@ async fn page_without_blocks_and_without_start_marker_is_an_error() {
     .await;
     let source = server.source();
 
-    for offset_id in [1, 2] {
-        let error = source.fetch_page(offset_id, 100).await.unwrap_err();
+    for before in [1, 2] {
+        let error = source.fetch_page(Some(before), 100).await.unwrap_err();
         assert!(matches!(error, HistoryError::Other(_)), "{error:?}");
     }
 }
@@ -135,7 +138,11 @@ async fn block_without_data_post_is_an_error() {
     let broken = fixtures::BEFORE_47107.replace("data-post=\"brieflyru/47099\"", "");
     let server = FeedServer::start([(Some(47107), Reply::page(&broken))]).await;
 
-    let error = server.source().fetch_page(47107, 100).await.unwrap_err();
+    let error = server
+        .source()
+        .fetch_page(Some(47107), 100)
+        .await
+        .unwrap_err();
 
     assert!(matches!(error, HistoryError::Other(_)), "{error:?}");
 }
@@ -146,7 +153,7 @@ async fn block_of_another_channel_is_an_error() {
         fixtures::BEFORE_5.replace("data-post=\"brieflyru/1\"", "data-post=\"otherchannel/1\"");
     let server = FeedServer::start([(Some(5), Reply::page(&foreign))]).await;
 
-    let error = server.source().fetch_page(5, 100).await.unwrap_err();
+    let error = server.source().fetch_page(Some(5), 100).await.unwrap_err();
 
     assert!(matches!(error, HistoryError::Other(_)), "{error:?}");
 }
@@ -163,8 +170,8 @@ async fn too_many_requests_is_flood_wait_with_own_pause_whatever_retry_after_say
     .await;
     let source = server.source();
 
-    for offset_id in [100, 200] {
-        let error = source.fetch_page(offset_id, 100).await.unwrap_err();
+    for before in [100, 200] {
+        let error = source.fetch_page(Some(before), 100).await.unwrap_err();
         assert!(
             matches!(error, HistoryError::FloodWait(FLOOD_WAIT_SECS)),
             "{error:?}"
@@ -188,8 +195,8 @@ async fn redirect_and_server_errors_are_other_errors() {
     .await;
     let source = server.source();
 
-    for offset_id in [100, 200, 300] {
-        let error = source.fetch_page(offset_id, 100).await.unwrap_err();
+    for before in [100, 200, 300] {
+        let error = source.fetch_page(Some(before), 100).await.unwrap_err();
         assert!(matches!(error, HistoryError::Other(_)), "{error:?}");
     }
     assert_eq!(server.queries().len(), 3);
@@ -208,7 +215,7 @@ async fn connection_failure_is_other_error() {
     })
     .unwrap();
 
-    let error = source.fetch_page(0, 100).await.unwrap_err();
+    let error = source.fetch_page(None, 100).await.unwrap_err();
 
     assert!(matches!(error, HistoryError::Other(_)), "{error:?}");
 }

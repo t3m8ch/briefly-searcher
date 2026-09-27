@@ -60,7 +60,11 @@ async fn too_many_requests_response_is_logged_as_warning_with_headers_and_body_s
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
 
-    server.source().fetch_page(100, 100).await.unwrap_err();
+    server
+        .source()
+        .fetch_page(Some(100), 100)
+        .await
+        .unwrap_err();
 
     let logs = logs.text();
     let line = logs

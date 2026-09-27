@@ -38,19 +38,19 @@ pub enum HistoryError {
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Источник истории канала: одна операция «страница по `offset_id`», как
-/// `messages.getHistory` или `t.me/s/<канал>?before=<offset_id>`.
+/// Источник истории канала: одна операция «страница блоков раньше `before`»,
+/// как `t.me/s/<канал>?before=<ID>` или `messages.getHistory` с `offset_id`.
 ///
 /// Загрузчик зависит только от этого trait, поэтому тесты подставляют
 /// поддельный источник.
 pub trait HistorySource {
     /// Запрашивает **страницу**: до `limit` (не больше [`MAX_PAGE_SIZE`])
-    /// сообщений с ID строго меньше `offset_id`, от большего ID к меньшему.
-    /// `offset_id = 0` означает «без границы» — самые свежие сообщения канала.
+    /// сообщений с ID строго меньше `before`, от большего ID к меньшему.
+    /// `None` означает «без границы» — самые свежие сообщения канала.
     /// Пустая страница означает, что более ранних сообщений нет.
     fn fetch_page(
         &self,
-        offset_id: i64,
+        before: Option<i64>,
         limit: u32,
     ) -> impl Future<Output = Result<Vec<Message>, HistoryError>> + Send;
 }
