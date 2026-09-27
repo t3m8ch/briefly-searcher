@@ -31,7 +31,7 @@ sqlx = { version = "0.9.0", default-features = false, features = [
 ] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 thiserror = "2.0.21"
-tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "signal", "time"] }
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["timeout"] }
 tracing = "0.1.44"

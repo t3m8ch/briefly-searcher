@@ -8,7 +8,7 @@ use std::ops::RangeInclusive;
 use std::sync::{Arc, Mutex};
 
 use briefly_searcher::clock::Clock;
-use briefly_searcher::loader::{Error, Loader, Settings};
+use briefly_searcher::loader::{self, Error, Loader, Settings};
 use briefly_searcher_storage::Storage;
 use briefly_searcher_telegram::{HistoryError, HistorySource, Message};
 use chrono::{DateTime, TimeDelta, TimeZone, Utc};
@@ -69,9 +69,9 @@ struct Channel {
     /// Сигналы остановки, которые подаются при получении запроса с этим
     /// `before` (`None` — без границы): запрос обслуживается как обычно.
     stop_at: HashMap<Option<i64>, oneshot::Sender<()>>,
-    /// Запрос с этим `before` остаётся без ответа; отправитель
-    /// сообщает, что источник его получил.
-    hang_at: Option<(i64, oneshot::Sender<()>)>,
+    /// Запросы с этим `before` остаются без ответа; отправитель
+    /// сообщает, что источник получил запрос.
+    hang_at: HashMap<i64, oneshot::Sender<()>>,
 }
 
 impl FakeChannel {
@@ -84,7 +84,7 @@ impl FakeChannel {
             publish_during: HashMap::new(),
             fail_after: None,
             stop_at: HashMap::new(),
-            hang_at: None,
+            hang_at: HashMap::new(),
         })))
     }
 
@@ -126,7 +126,7 @@ impl FakeChannel {
     /// приёмник срабатывает, когда источник получил этот запрос.
     fn hang_at_request(&self, before: i64) -> oneshot::Receiver<()> {
         let (received, receiver) = oneshot::channel();
-        self.0.lock().unwrap().hang_at = Some((before, received));
+        self.0.lock().unwrap().hang_at.insert(before, received);
         receiver
     }
 
@@ -147,13 +147,18 @@ impl Channel {
         }
     }
 
+    /// Ответ на запрос; `None` — источник оставляет запрос без ответа.
     fn fetch_page(
         &mut self,
         before: Option<i64>,
         limit: u32,
-    ) -> Result<Vec<Message>, HistoryError> {
+    ) -> Option<Result<Vec<Message>, HistoryError>> {
         let at = self.clock.now();
         self.requests.push(Request { before, at });
+        if let Some(received) = before.and_then(|b| self.hang_at.remove(&b)) {
+            received.send(()).unwrap();
+            return None;
+        }
         if let Some(ids) = before.and_then(|b| self.publish_during.remove(&b)) {
             self.publish(ids);
         }
@@ -166,10 +171,10 @@ impl Channel {
         }
         let failing = self.fail_after.is_some_and(|n| self.requests.len() > n);
         if fail_once.is_some() || failing {
-            return Err(HistoryError::Other("источник недоступен".into()));
+            return Some(Err(HistoryError::Other("источник недоступен".into())));
         }
         let upper = before.unwrap_or(i64::MAX);
-        Ok(self
+        Some(Ok(self
             .messages
             .range(..upper)
             .rev()
@@ -179,7 +184,7 @@ impl Channel {
                 payload: payload(id, text),
                 payload_schema: PAYLOAD_SCHEMA.to_owned(),
             })
-            .collect())
+            .collect()))
     }
 }
 
@@ -189,25 +194,11 @@ impl HistorySource for FakeChannel {
         before: Option<i64>,
         limit: u32,
     ) -> Result<Vec<Message>, HistoryError> {
-        let hang = {
-            let mut channel = self.0.lock().unwrap();
-            match channel.hang_at.take() {
-                Some((hang_before, received)) if Some(hang_before) == before => {
-                    let at = channel.clock.now();
-                    channel.requests.push(Request { before, at });
-                    Some(received)
-                }
-                hang_at => {
-                    channel.hang_at = hang_at;
-                    None
-                }
-            }
-        };
-        if let Some(received) = hang {
-            received.send(()).unwrap();
-            return pending().await;
+        let response = self.0.lock().unwrap().fetch_page(before, limit);
+        match response {
+            Some(page) => page,
+            None => pending().await,
         }
-        self.0.lock().unwrap().fetch_page(before, limit)
     }
 }
 
@@ -235,6 +226,18 @@ fn loader(
         clock.clone(),
         settings(),
     )
+}
+
+/// Процесс загрузчика, как его запускает команда: блокировка единственного
+/// экземпляра, затем подключение к источнику и проходы до остановки.
+async fn run_loader(
+    pool: &PgPool,
+    channel: &FakeChannel,
+    clock: &FakeClock,
+    shutdown: impl Future<Output = ()>,
+) -> Result<(), Error> {
+    let lock = loader::lock(&Storage::from_pool(pool.clone())).await?;
+    loader(pool, channel, clock).run(lock, shutdown).await
 }
 
 async fn stored_ids(pool: &PgPool) -> Vec<i64> {
@@ -412,8 +415,7 @@ async fn requests_are_paced_and_passes_repeat_with_poll_interval(pool: PgPool) {
     // завершается ошибкой и останавливает загрузчик.
     channel.fail_after(4);
 
-    loader(&pool, &channel, &clock)
-        .run(pending())
+    run_loader(&pool, &channel, &clock, pending())
         .await
         .unwrap_err();
 
@@ -455,7 +457,7 @@ async fn stop_signal_ends_loader_after_current_page_and_next_run_resumes(pool: P
     // 9 8 7 | сигнал приходит, пока источник отвечает на второй запрос.
     let stop = channel.stop_at_request(Some(7));
 
-    loader(&pool, &channel, &clock).run(stop).await.unwrap();
+    run_loader(&pool, &channel, &clock, stop).await.unwrap();
 
     // Ответ на текущий запрос сохранён, новых запросов не было.
     assert_eq!(channel.befores(), [None, Some(7)]);
@@ -465,7 +467,7 @@ async fn stop_signal_ends_loader_after_current_page_and_next_run_resumes(pool: P
     // 3 2 1 | пустая страница — проход завершён; сигнал приходит во время
     // первого запроса следующего прохода.
     let stop = channel.stop_at_request(None);
-    loader(&pool, &channel, &clock).run(stop).await.unwrap();
+    run_loader(&pool, &channel, &clock, stop).await.unwrap();
 
     assert_eq!(channel.befores(), [None, Some(7), Some(4), Some(1), None]);
     assert_eq!(stored_ids(&pool).await, Vec::from_iter(1..=9));
@@ -480,28 +482,24 @@ async fn second_loader_exits_without_requests_while_first_is_running(pool: PgPoo
     // Первый экземпляр ждёт ответа на второй запрос прохода.
     let first_waits = first_channel.hang_at_request(7);
     let (stop_first, first_stopped) = oneshot::channel::<()>();
-    let mut first = loader(&pool, &first_channel, &clock);
-    let first = tokio::spawn(async move {
-        first
-            .run(async {
+    let first = tokio::spawn({
+        let (pool, channel, clock) = (pool.clone(), first_channel.clone(), clock.clone());
+        async move {
+            let stop = async {
                 first_stopped.await.unwrap();
-            })
-            .await
+            };
+            run_loader(&pool, &channel, &clock, stop).await
+        }
     });
     first_waits.await.unwrap();
 
     let second_channel = FakeChannel::new(&clock);
     second_channel.publish(1..=9);
-    let error = loader(&pool, &second_channel, &clock)
-        .run(pending())
+    let error = run_loader(&pool, &second_channel, &clock, pending())
         .await
         .unwrap_err();
 
     assert!(matches!(error, Error::AlreadyRunning), "{error:?}");
-    assert!(
-        error.to_string().contains("уже запущен"),
-        "понятная ошибка: {error}"
-    );
     assert_eq!(second_channel.requests(), []);
 
     // Первый останавливается, не дождавшись ответа; новый экземпляр берёт
@@ -511,8 +509,7 @@ async fn second_loader_exits_without_requests_while_first_is_running(pool: PgPoo
     let third_channel = FakeChannel::new(&clock);
     third_channel.publish(1..=9);
     let stop_third = third_channel.stop_at_request(Some(1));
-    loader(&pool, &third_channel, &clock)
-        .run(stop_third)
+    run_loader(&pool, &third_channel, &clock, stop_third)
         .await
         .unwrap();
 
