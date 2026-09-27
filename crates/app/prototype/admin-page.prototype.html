@@ -76,11 +76,14 @@
   .j-row > span { padding: 5px 0; }
   .j-when { color: #aab3aa; }
   .j-rel { color: #7c877c; text-align: right; }
-  .j-mark { display: flex; align-items: center; justify-content: center; background: linear-gradient(#2c332c, #2c332c) center / 1px 100% no-repeat; }
-  .j-dot { width: 9px; height: 9px; border-radius: 50%; border: 2px solid currentColor; background: currentColor; box-shadow: 0 0 0 3px #0f1110; }
+  .j-mark { text-align: center; background: linear-gradient(#2c332c, #2c332c) center / 1px 100% no-repeat; }
+  /* центр кружка — на половине высоты заглавных букв (единица cap берёт её из текущего шрифта) */
+  .j-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 2px solid currentColor; background: currentColor; box-shadow: 0 0 0 3px #0f1110;
+    vertical-align: 0; vertical-align: calc(0.5cap - 4.5px); }
   .j-dot.future { background: #0f1110; }
-  /* кружок состояния: CSS, а не символ ●, чтобы стоял по центру строчных букв */
-  .t-dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%; background: currentColor; vertical-align: middle; margin-right: .4em; position: relative; top: -.05em; }
+  /* кружок состояния: CSS, а не символ ●; центр — на половине высоты заглавных букв (единица cap) */
+  .t-dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%; background: currentColor; margin-right: .4em;
+    vertical-align: .05em; vertical-align: calc(0.5cap - 0.3em); }
   .j-what { color: #ecf0ec; }
   .j-extra { grid-column: 4; padding: 0 0 6px; white-space: pre-wrap; margin-top: -4px; }
   .j-gap { grid-column: 3; background: linear-gradient(#2c332c, #2c332c) center / 1px 100% no-repeat; }
