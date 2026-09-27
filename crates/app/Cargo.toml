@@ -1,0 +1,15 @@
+[package]
+name = "briefly-searcher"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+briefly-searcher-storage.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+envconfig.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

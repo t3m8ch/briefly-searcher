@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            table_name::text AS \"table_name!\",\n            column_name::text AS \"column_name!\",\n            data_type::text AS \"data_type!\",\n            is_nullable = 'YES' AS \"is_nullable!\"\n        FROM information_schema.columns\n        WHERE table_schema = 'public' AND table_name <> '_sqlx_migrations'\n        ORDER BY table_name, ordinal_position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "table_name!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "column_name!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "data_type!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "is_nullable!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "b99f2f3d54f017040084d62749571f2df426f4efaeb0571402e8e17ee27d3496"
+}
