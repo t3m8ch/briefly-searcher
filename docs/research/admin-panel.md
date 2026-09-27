@@ -2,7 +2,7 @@
 
 Предмет: команда `web` из [issue #6](https://github.com/t3m8ch/briefly-searcher/issues/6). Это локальная сводка загрузчика, доступная только на чтение: `GET /` отдаёт страницу, `GET /status` отдаёт HTML-фрагмент, HTMX хранится в репозитории. Поля сводки заданы в [плане, раздел «Веб-админка»](../scraper-plan.md#3-веб-админка). Способ построения спека уже зафиксировала: готовый HTML, без JSON API и без собственного JavaScript. Поэтому здесь не выбирается «SPA или сервер», а разбирается, как сделать это хорошо в стеке проекта и как должна выглядеть одна страница.
 
-**Ответ:** `axum` 0.8 и шаблоны `askama`, где один шаблон содержит `{% block status %}`. `/` рендерит шаблон целиком, `/status` рендерит только этот блок. HTMX 2.0.11 вшит в бинарник через `include_str!`. Данные даёт один запрос хранилища с `now()` из БД. Страница одна: заголовок состояния, баннер паузы, блок ошибки, блок прохода и список «ключ — значение». Всё прочее, что обычно бывает в админках (таблицы, фильтры, навигация, действия), в часть 1 не входит.
+**Ответ:** `axum` 0.8 и шаблоны `askama`, где один шаблон содержит `{% block status %}`. `/` рендерит шаблон целиком, `/status` рендерит только этот блок. HTMX 2.0.11 вшит в бинарник через `include_str!`. Сервер отдаёт времена в UTC, а крошечный скрипт переводит их в пояс браузера (единственное отступление от «без собственного JS»). Данные даёт один запрос хранилища с `now()` из БД. Страница одна: заголовок состояния, баннер паузы, блок ошибки, блок прохода и список «ключ — значение». Всё прочее, что обычно бывает в админках (таблицы, фильтры, навигация, действия), в часть 1 не входит.
 
 Слова «**Вывод:**» отмечают собственные выводы, прямо в источниках не записанные.
 
@@ -89,11 +89,31 @@ FROM ingestion_state i CROSS JOIN worker_state w;
 
 Что намеренно не переносится: боковая навигация, поиск, кнопки «Refresh» / «Manual sync» / «Optimize» и таблицы с фильтрами из тех же экранов. **Вывод:** в части 1 страница одна и только читает данные. Навигация понадобится, когда в части 2 появятся поиск и действия ([план, раздел 3](../scraper-plan.md#3-веб-админка)).
 
-### Устаревшие данные без JavaScript
+### Устаревшие данные
 
-Критерий issue: «если сервер не ответил или вернул ошибку, на экране остаются последние данные». **Вывод:** последние данные на экране сами по себе вводят в заблуждение, если не видно, что они старые. Без собственного JS помогают две вещи:
+Критерий issue: «если сервер не ответил или вернул ошибку, на экране остаются последние данные». **Вывод:** последние данные на экране сами по себе вводят в заблуждение, если не видно, что они старые. Помогают две вещи, обе без логики на клиенте:
 - во фрагменте рендерится «Сводка на 14:30:05» (время `now()` из запроса). Если опрос перестал проходить, штамп перестаёт меняться (как в референсе 1);
 - все времена показываются абсолютными («heartbeat 14:30:01»), а не «3 с назад»: относительное время, отрендеренное сервером, при сбое опроса застынет и будет врать. Относительную подсказку можно ставить рядом только в дополнение.
+
+### Часовой пояс (решено)
+
+Сервер отдаёт все времена в UTC, пояс берётся из браузера. Каждое время рендерится как `<time datetime="2026-09-27T03:00:00Z">2026-09-27 03:00:00 UTC</time>`, а маленький встроенный скрипт переписывает текст на локальное время:
+
+```html
+<script>
+  htmx.onLoad(function (root) {
+    root.querySelectorAll('time[datetime]').forEach(function (el) {
+      el.textContent = new Date(el.dateTime).toLocaleString();
+    });
+  });
+</script>
+```
+
+- `htmx.onLoad` вызывается и при первой загрузке страницы, и на каждый вставленный htmx фрагмент: в htmx 2 событие `htmx:load` срабатывает на `body` при старте и на каждом вставленном элементе ([docs.md, Events](https://github.com/bigskysoftware/htmx/blob/master/www/content/docs.md); [src/htmx.js](https://github.com/bigskysoftware/htmx/blob/master/src/htmx.js)). Поэтому свежий `/status` тоже получает локальное время, отдельный обработчик `htmx:afterSwap` не нужен.
+- `querySelectorAll` ищет среди потомков, поэтому `<time>` не должен быть самим корнем вставляемого фрагмента: при `hx-swap="innerHTML"` времена лежат внутри строк `<dl>`, это выполняется.
+- Без JS на экране остаётся UTC с явной пометкой, так что страница не врёт и в этом случае.
+- Сервер форматирует время из `chrono::DateTime<Utc>` (chrono уже в workspace) в RFC 3339 для `datetime` и в читаемый вид для текста.
+- **Отступление от спеки.** Issue #6 и [план, раздел 3](../scraper-plan.md#3-веб-админка) говорят «собственного JavaScript нет». Этот скрипт — единственное исключение: он только форматирует время и не ходит в сеть. Формулировку в issue и плане нужно поправить.
 
 ## Реализация
 
@@ -102,7 +122,7 @@ FROM ingestion_state i CROSS JOIN worker_state w;
 | Вариант | Соответствие issue #6 |
 | --- | --- |
 | **axum + askama + HTMX** | Подходит. Рекомендуется (ниже). |
-| axum + maud + HTMX | Подходит. Равноценная альтернатива askama. |
+| axum + maud + HTMX | Подходит, но выбран askama: шаблоны в `.html`-файлах. |
 | axum + minijinja + HTMX | Подходит, но шаблоны разбираются во время выполнения. |
 | SPA (например, React-admin) | Не подходит. React-admin — фреймворк для SPA «on top of REST/GraphQL APIs», работает через *Data Providers* к API ([README](https://github.com/marmelab/react-admin/blob/master/README.md)). Спека запрещает JSON API и собственный JS. |
 | Внешний DB-клиент к PostgreSQL (pgAdmin, Adminer и т. п.) | Не подходит. **Вывод:** универсальный клиент показывает любые таблицы, включая `telegram_session`, а её нельзя выводить в админке ([план, раздел 2](../scraper-plan.md#2-хранилище)). К тому же это второй процесс со своей конфигурацией вне бинарника (ADR-0002) и без производных полей вроде «идёт ли проход». |
@@ -117,7 +137,7 @@ Rust-crates «готовых админок» не рассматривалис�
 - В default features axum есть `json` ([axum/Cargo.toml](https://github.com/tokio-rs/axum/blob/axum-v0.8.9/axum/Cargo.toml)). **Вывод:** выключать их не обязательно: запрет JSON API касается маршрутов, а не зависимостей.
 - **Тесты** (критерий «HTTP-запросы к роутеру над тестовой БД»): официальный пример вызывает `Router` без сети через `tower::ServiceExt::oneshot(Request)`, а тело читает `http_body_util::BodyExt` ([examples/testing](https://github.com/tokio-rs/axum/blob/axum-v0.8.9/examples/testing/src/main.rs); dev-зависимости `tower` с feature `util` и `http-body-util` — в [examples/templates/Cargo.toml](https://github.com/tokio-rs/axum/blob/axum-v0.8.9/examples/templates/Cargo.toml)). **Вывод:** в связке с `#[sqlx::test]` тест получает `PgPool`, заполняет `ingestion_state`/`worker_state` через `UPDATE`, строит роутер через `Storage::from_pool` и проверяет HTML ответа `/status`. Так и предлагает issue: состояние готовится прямо в БД.
 
-### Шаблоны: askama (рекомендуется) или maud
+### Шаблоны: askama (решено) или maud
 
 - **askama** 0.16.1 ([crates.io API](https://crates.io/api/v1/crates/askama), выпуск 2026-09-04; [askama-rs/askama](https://github.com/askama-rs/askama), MIT OR Apache-2.0). Jinja-подобный синтаксис; «generates type-safe Rust code from your templates at compile time» ([README](https://github.com/askama-rs/askama/blob/main/README.md)). Шаблоны ищутся в `templates/` относительно корня crate ([book: configuration](https://github.com/askama-rs/askama/blob/main/book/src/configuration.md)). HTML экранируется по умолчанию для расширений `html`, `htm`, `xml`, `j2`, `jinja`, `jinja2` (там же, раздел «Escapers»).
 - **Главное для issue:** атрибут `#[template(path = "...", block = "status")]` рендерит только один блок шаблона: «useful when you need to decompose your template for partial rendering, without needing to extract the partial into a separate template». Вариант `blocks = [...]` генерирует методы `as_<block>()` ([book: creating templates](https://github.com/askama-rs/askama/blob/main/book/src/creating_templates.md); [template syntax](https://github.com/askama-rs/askama/blob/main/book/src/template_syntax.md)). **Вывод:** `/` и `/status` рендерят один и тот же файл `admin.html` из одной структуры сводки, поэтому разметка фрагмента в них одинакова. Это прямо ложится на требование issue «данные обоих маршрутов даёт одна функция».
@@ -134,20 +154,20 @@ Rust-crates «готовых админок» не рассматривалис�
 - **Критерий «при ошибке остаются последние данные» зависит от версии HTMX.**
   - htmx 2: по умолчанию `{code:"[45]..", swap: false, error:true}` — ответы 4xx/5xx не вставляются в страницу. При обрыве соединения срабатывает `htmx:sendError`, и вставлять тоже нечего ([docs.md, Response Handling](https://github.com/bigskysoftware/htmx/blob/master/www/content/docs.md)). Значит, достаточно, чтобы `/status` при ошибке хранилища отвечал 5xx, а не 200 с текстом ошибки.
   - htmx 4: «htmx 4 swaps all HTTP responses. Only 204 and 304 do not swap… htmx 2 did not swap 4xx and 5xx responses». Прежнее поведение возвращается через `htmx.config.noSwap = [204, 304, '4xx', '5xx']` или атрибутом `hx-status:5xx="swap:none"` ([whats-new-in-htmx-4.md, ветка `four`](https://github.com/bigskysoftware/htmx/blob/four/www/src/content/docs/whats-new-in-htmx-4.md)).
-  - **Вывод:** взять htmx 2.0.11 (тег `latest`) и отвечать 5xx. Если выбрать 4.x, в разметку нужно добавить `hx-status:5xx="swap:none"` и держать эту деталь в тесте разметки `/`. В обоих случаях поведение браузера автоматически не тестируется (так в issue), поэтому выбранную версию и атрибут стоит записать комментарием в шаблоне.
+  - **Решено:** htmx 2.0.11 (тег `latest`), `/status` при ошибке отвечает 5xx. Если выбрать 4.x, в разметку нужно добавить `hx-status:5xx="swap:none"` и держать эту деталь в тесте разметки `/`. В обоих случаях поведение браузера автоматически не тестируется (так в issue), поэтому выбранную версию и атрибут стоит записать комментарием в шаблоне.
 - **Разметка.** **Вывод:** атрибуты опроса ставятся на внешний элемент в `/`: `<section id="status" hx-get="/status" hx-trigger="every 5s" hx-swap="innerHTML">`. `/status` отдаёт только внутреннее содержимое. Тогда фрагмент не несёт `hx-*` и не зависит от различий 2.x/4.x в `outerHTML`/`outerMorph`, а при первой загрузке `/` блок уже заполнен тем же `{% block status %}`.
 - **Отдача файла.** **Вывод:** `include_str!("…/htmx.min.js")` и маршрут вида `GET /htmx.min.js` с `Content-Type: text/javascript`. Файл попадает в бинарник, и релиз остаётся «бинарник + окружение», без каталога статики рядом ([ADR-0002](../adr/0002-twelve-factor-app.md); [план, раздел 5, фактор V](../scraper-plan.md#5-эксплуатация-12-factor)). CSS так же можно вшить через `<style>` в шаблоне.
 - В 2.x `htmx.config.selfRequestsOnly` по умолчанию `true`: запросы только к своему домену ([docs.md, Configuration](https://github.com/bigskysoftware/htmx/blob/master/www/content/docs.md)).
 
 ### Доступ и безопасность
 
-- Аутентификации в спеке нет. Защита — привязка к loopback по умолчанию и адрес из окружения (issue #6, [план, фактор VII](../scraper-plan.md#5-эксплуатация-12-factor)). Конфигурацию можно описать как в [`config.rs`](../../crates/app/src/config.rs): `envconfig` поддерживает `default = "…"` ([envconfig README](https://github.com/greyblake/envconfig-rs/blob/master/README.md)). Например, `WEB_ADDR` со значением по умолчанию `127.0.0.1:<порт>` (имя и порт — открытый вопрос).
-- **DNS rebinding.** По NCC Group, HTTP-сервер без HTTPS, без аутентификации и без проверки `Host` уязвим для DNS rebinding. Для сервиса на loopback допустимые `Host` — только `localhost` и loopback-адреса с портом, например `127.0.0.1:3000` и `localhost:3000` ([NCC Group Singularity: Preventing DNS Rebinding Attacks](https://github.com/nccgroup/singularity/wiki/Preventing-DNS-Rebinding-Attacks)). План требует проверку `Host`/`Origin` только для будущих `POST` части 2 ([план, раздел 3](../scraper-plan.md#3-веб-админка)). **Вывод:** в части 1 чужой сайт через rebinding смог бы прочитать только сводку, где секретов нет. Проверка `Host` — дешёвый middleware; его можно заложить сразу, чтобы в части 2 не забыть.
+- Аутентификации в спеке нет. Защита — привязка к loopback по умолчанию и адрес из окружения (issue #6, [план, фактор VII](../scraper-plan.md#5-эксплуатация-12-factor)). Конфигурацию можно описать как в [`config.rs`](../../crates/app/src/config.rs): `envconfig` поддерживает `default = "…"` ([envconfig README](https://github.com/greyblake/envconfig-rs/blob/master/README.md)). Решено: `WEB_ADDR` со значением по умолчанию `127.0.0.1:3000`. Интервал опроса UI — константа 5 с в шаблоне, отдельной переменной нет.
+- **DNS rebinding.** По NCC Group, HTTP-сервер без HTTPS, без аутентификации и без проверки `Host` уязвим для DNS rebinding. Для сервиса на loopback допустимые `Host` — только `localhost` и loopback-адреса с портом, например `127.0.0.1:3000` и `localhost:3000` ([NCC Group Singularity: Preventing DNS Rebinding Attacks](https://github.com/nccgroup/singularity/wiki/Preventing-DNS-Rebinding-Attacks)). План требует проверку `Host`/`Origin` только для будущих `POST` части 2 ([план, раздел 3](../scraper-plan.md#3-веб-админка)). **Вывод:** в части 1 чужой сайт через rebinding смог бы прочитать только сводку, где секретов нет. Проверка `Host` — дешёвый middleware. Решено: делать её сразу в #6, чтобы в части 2 не забыть.
 - Секреты: сводка по построению не читает `telegram_session`, а `last_error` не должен содержать секретов — это требование к загрузчику ([план, `worker_state`](../scraper-plan.md#2-хранилище)). **Вывод:** тест «на странице нет содержимого `telegram_session`» полезен как регрессионный: вставить в таблицу известную строку и проверить, что её нет в ответах `/` и `/status`.
 
 ## Рекомендация и MVP-экран
 
-**Подход:** подкоманда `web` в `crates/app` (модуль `web`, шаблоны в `crates/app/templates/`) → `axum` 0.8 + `askama` с `block` + вшитый htmx 2.0.11. Одна функция хранилища `admin_summary()` → структура, где все поля — `Option<…>`, плюс `now`. `/status` при ошибке хранилища отвечает 5xx. Завершение — `with_graceful_shutdown` по SIGINT/SIGTERM. Тесты — `#[sqlx::test]` + `oneshot`.
+**Подход:** подкоманда `web` в `crates/app` (модуль `web`, шаблоны в `crates/app/templates/`) → `axum` 0.8 + `askama` с `block` + вшитый htmx 2.0.11 + встроенный скрипт локального времени. `WEB_ADDR` по умолчанию `127.0.0.1:3000`, проверка `Host` пропускает только loopback-адреса и `localhost`. Одна функция хранилища `admin_summary()` → структура, где все поля — `Option<…>`, плюс `now`. `/status` при ошибке хранилища отвечает 5xx. Завершение — `with_graceful_shutdown` по SIGINT/SIGTERM. Тесты — `#[sqlx::test]` + `oneshot`.
 
 Одна страница, сверху вниз:
 
@@ -159,10 +179,14 @@ Rust-crates «готовых админок» не рассматривалис�
 | Загрузка истории: «Первый проход: дошёл до ID N» / «Проход: дошёл до ID N» / «История загружена, `newest_fetched_id` = N»; под этим «Сохранено M сообщений», без процента | всегда | Braintrust ([3](https://mobbin.com/screens/ed269b7f-be0a-45f9-8279-6226ab185f8a)); анти-пример Literal ([↗](https://mobbin.com/screens/d42b996a-a56d-48a0-97da-76bec5b44a3b)) |
 | Детали `<dl>`: heartbeat, последний успешный запрос, `newest_fetched_id`, сообщений в `raw_posts`; пустые значения — словами | всегда | Customer.io details ([2](https://mobbin.com/screens/dac79f39-b619-4919-96cf-552530760314)), Supabase ([6](https://mobbin.com/screens/2e0ffd2d-c588-4513-bd84-d3effa2e31ed)) |
 
-## Открытые вопросы
+## Принятые решения
 
-1. **Часовой пояс.** JS нет, поэтому пояс выбирает сервер. Показывать UTC с явной пометкой или брать пояс из окружения?
-2. **Имя переменной и порт** адреса веб-сервера (`WEB_ADDR`?) и интервал опроса UI (5 с?). Отдельная переменная для интервала вряд ли нужна.
-3. **htmx 2.0.11 или 4.0.0?** 4.x уже вышла под тегом `next`, но меняет обработку ошибок (см. выше). Рекомендация — 2.x.
-4. **Проверка `Host` сразу в #6** или, как в плане, только вместе с `POST`-действиями части 2?
-5. **askama или maud:** шаблоны в `.html`-файлах или разметка в Rust-коде.
+1. **Порог «не отвечает»:** константа около 90 с плюс требования к heartbeat загрузчика (раздел выше).
+2. **Прошедшая ошибка:** показывается приглушённо, загрузчик не очищает `last_error`.
+3. **Часовой пояс:** сервер отдаёт UTC, браузер переводит в локальное время маленьким скриптом.
+4. **Адрес:** `WEB_ADDR`, по умолчанию `127.0.0.1:3000`; интервал опроса UI — 5 с, константой.
+5. **htmx 2.0.11.**
+6. **Проверка `Host`** — сразу в #6.
+7. **askama.**
+
+Открытых вопросов нет. Отступление от спеки (скрипт времени) нужно отразить в issue #6 и в плане.
