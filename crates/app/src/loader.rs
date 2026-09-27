@@ -5,9 +5,11 @@
 //! хранится отдельно, а выводится хранилищем из `raw_posts` и
 //! `newest_fetched_id` (см. `docs/scraper-plan.md`, раздел 1).
 
-use std::convert::Infallible;
+use std::future::{Future, pending};
+use std::ops::ControlFlow;
+use std::pin::{Pin, pin};
 
-use briefly_searcher_storage::{RawMessage, Storage};
+use briefly_searcher_storage::{LoaderLock, RawMessage, Storage};
 use briefly_searcher_telegram::{HistoryError, HistorySource, MAX_PAGE_SIZE, Message};
 use chrono::{DateTime, TimeDelta, Utc};
 
@@ -24,13 +26,29 @@ pub struct Settings {
     pub poll_interval: TimeDelta,
 }
 
-/// Ошибка, прервавшая проход.
+/// Ошибка, прервавшая проход или не давшая загрузчику начать работу.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error(
+        "загрузчик уже запущен: advisory-блокировку PostgreSQL держит другой экземпляр, \
+         второй не нужен"
+    )]
+    AlreadyRunning,
     #[error("ошибка источника истории: {0}")]
     Source(#[from] HistoryError),
     #[error(transparent)]
     Storage(#[from] briefly_searcher_storage::Error),
+}
+
+/// Берёт блокировку единственного экземпляра загрузчика (ADR-0002) и
+/// держит её, пока [`Loader::run`] не вернётся. Вызывается до создания
+/// источника: если блокировку держит другой экземпляр, процесс завершается с
+/// [`Error::AlreadyRunning`], не обращаясь к Telegram.
+pub async fn lock(storage: &Storage) -> Result<LoaderLock, Error> {
+    storage
+        .try_lock_loader()
+        .await?
+        .ok_or(Error::AlreadyRunning)
 }
 
 /// Загрузчик одного канала. Запросы к источнику идут строго по одному.
@@ -61,13 +79,46 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
         }
     }
 
-    /// Повторяет проходы с интервалом опроса. Пока возвращается при первой
-    /// же ошибке источника или хранилища.
-    pub async fn run(&mut self) -> Result<Infallible, Error> {
+    /// Повторяет проходы с интервалом опроса, пока не завершится `shutdown`,
+    /// и держит `lock` до возврата. Пока возвращается и при первой же ошибке
+    /// источника или хранилища.
+    ///
+    /// Остановка не прерывает сохранение: полученная от источника страница
+    /// сохраняется своей транзакцией, и только потом `run` возвращается.
+    /// Запрос, на который источник ещё не ответил, бросается — после
+    /// перезапуска он повторится. Новых запросов после сигнала нет.
+    ///
+    /// `lock` передаётся по значению: вместе с ним `run` забирает
+    /// ответственность за снятие блокировки. Только `run` знает, когда работа
+    /// закончилась, в том числе по ошибке, поэтому снимает блокировку сам при
+    /// любом исходе. Вызывающий код не может ни забыть её снять, ни уронить
+    /// раньше времени, пока идут проходы: блокировка живёт ровно столько,
+    /// сколько `run`. Получить `LoaderLock` можно только через [`lock`] — до
+    /// создания источника.
+    pub async fn run(
+        &mut self,
+        lock: LoaderLock,
+        shutdown: impl Future<Output = ()>,
+    ) -> Result<(), Error> {
+        let result = self.run_passes(shutdown).await;
+        // Снимается при любом исходе проходов. Если сломалось и то и другое,
+        // возвращается ошибка прохода: она объясняет, почему загрузчик встал.
+        let released = lock.release().await;
+        result?;
+        Ok(released?)
+    }
+
+    async fn run_passes(&mut self, shutdown: impl Future<Output = ()>) -> Result<(), Error> {
+        let mut shutdown = pin!(shutdown);
         loop {
-            self.run_pass().await?;
+            if self.pass(shutdown.as_mut()).await?.is_break() {
+                return Ok(());
+            }
             let next_pass_at = self.clock.now() + self.settings.poll_interval;
-            self.clock.sleep_until(next_pass_at).await;
+            let sleep = self.clock.sleep_until(next_pass_at);
+            if unless_stopped(shutdown.as_mut(), sleep).await.is_break() {
+                return Ok(());
+            }
         }
     }
 
@@ -76,10 +127,24 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
     /// последняя — вместе со сдвигом `newest_fetched_id`. Если проход прерван
     /// ошибкой, следующий вызов продолжит его с первой несохранённой страницы.
     pub async fn run_pass(&mut self) -> Result<(), Error> {
+        let _: ControlFlow<()> = self.pass(pin!(pending())).await?;
+        Ok(())
+    }
+
+    /// Проход, который прекращается без новых запросов к источнику, когда
+    /// завершается `shutdown`; тогда возвращает `Break`.
+    async fn pass(
+        &mut self,
+        mut shutdown: Pin<&mut impl Future<Output = ()>>,
+    ) -> Result<ControlFlow<()>, Error> {
         let state = self.storage.pass_state().await?;
         let mut before = state.resume_before;
         loop {
-            let page = self.fetch_page(before).await?;
+            let fetch = self.fetch_page(before);
+            let ControlFlow::Continue(page) = unless_stopped(shutdown.as_mut(), fetch).await else {
+                return Ok(ControlFlow::Break(()));
+            };
+            let page = page?;
             let messages: Vec<_> = page.iter().map(raw_message).collect();
             let fetched_at = self.clock.now();
             // Проход завершается на пустой странице (начало канала) или на
@@ -91,7 +156,7 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
                 }
                 _ => {
                     self.storage.finish_pass(&messages, fetched_at).await?;
-                    return Ok(());
+                    return Ok(ControlFlow::Continue(()));
                 }
             }
         }
@@ -111,6 +176,21 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
             .await;
         self.last_request_at = Some(self.clock.now());
         page
+    }
+}
+
+/// Ждёт `future`, пока не завершился `shutdown`; `Break` — если остановка
+/// пришла раньше. Сигнал проверяется до `future`, поэтому после него не
+/// начинается новой работы, а результат, готовый одновременно с сигналом,
+/// бросается.
+async fn unless_stopped<T>(
+    shutdown: Pin<&mut impl Future<Output = ()>>,
+    future: impl Future<Output = T>,
+) -> ControlFlow<(), T> {
+    tokio::select! {
+        biased;
+        () = shutdown => ControlFlow::Break(()),
+        output = future => ControlFlow::Continue(output),
     }
 }
 

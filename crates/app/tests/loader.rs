@@ -3,16 +3,18 @@
 //! запросов источника.
 
 use std::collections::{BTreeMap, HashMap};
+use std::future::{Future, pending};
 use std::ops::RangeInclusive;
 use std::sync::{Arc, Mutex};
 
 use briefly_searcher::clock::Clock;
-use briefly_searcher::loader::{Loader, Settings};
+use briefly_searcher::loader::{self, Error, Loader, Settings};
 use briefly_searcher_storage::Storage;
 use briefly_searcher_telegram::{HistoryError, HistorySource, Message};
 use chrono::{DateTime, TimeDelta, TimeZone, Utc};
 use serde_json::json;
 use sqlx::PgPool;
+use tokio::sync::oneshot;
 
 const PAYLOAD_SCHEMA: &str = "fake-source v1";
 const PAGE_SIZE: u32 = 3;
@@ -64,6 +66,12 @@ struct Channel {
     publish_during: HashMap<i64, RangeInclusive<i64>>,
     /// Все запросы после этого числа завершаются ошибкой.
     fail_after: Option<usize>,
+    /// Сигналы остановки, которые подаются при получении запроса с этим
+    /// `before` (`None` — без границы): запрос обслуживается как обычно.
+    stop_at: HashMap<Option<i64>, oneshot::Sender<()>>,
+    /// Запросы с этим `before` остаются без ответа; отправитель
+    /// сообщает, что источник получил запрос.
+    hang_at: HashMap<i64, oneshot::Sender<()>>,
 }
 
 impl FakeChannel {
@@ -75,6 +83,8 @@ impl FakeChannel {
             fail_once_at: Vec::new(),
             publish_during: HashMap::new(),
             fail_after: None,
+            stop_at: HashMap::new(),
+            hang_at: HashMap::new(),
         })))
     }
 
@@ -102,6 +112,24 @@ impl FakeChannel {
         self.0.lock().unwrap().fail_after = Some(requests);
     }
 
+    /// Сигнал остановки загрузчика, который подаётся, когда источник
+    /// получает запрос с этим `before`.
+    fn stop_at_request(&self, before: Option<i64>) -> impl Future<Output = ()> + Send + 'static {
+        let (stop, stopped) = oneshot::channel();
+        self.0.lock().unwrap().stop_at.insert(before, stop);
+        async move {
+            stopped.await.unwrap();
+        }
+    }
+
+    /// Запрос с этим `before` останется без ответа. Возвращённый
+    /// приёмник срабатывает, когда источник получил этот запрос.
+    fn hang_at_request(&self, before: i64) -> oneshot::Receiver<()> {
+        let (received, receiver) = oneshot::channel();
+        self.0.lock().unwrap().hang_at.insert(before, received);
+        receiver
+    }
+
     fn requests(&self) -> Vec<Request> {
         self.0.lock().unwrap().requests.clone()
     }
@@ -119,15 +147,23 @@ impl Channel {
         }
     }
 
+    /// Ответ на запрос; `None` — источник оставляет запрос без ответа.
     fn fetch_page(
         &mut self,
         before: Option<i64>,
         limit: u32,
-    ) -> Result<Vec<Message>, HistoryError> {
+    ) -> Option<Result<Vec<Message>, HistoryError>> {
         let at = self.clock.now();
         self.requests.push(Request { before, at });
+        if let Some(received) = before.and_then(|b| self.hang_at.remove(&b)) {
+            received.send(()).unwrap();
+            return None;
+        }
         if let Some(ids) = before.and_then(|b| self.publish_during.remove(&b)) {
             self.publish(ids);
+        }
+        if let Some(stop) = self.stop_at.remove(&before) {
+            stop.send(()).unwrap();
         }
         let fail_once = self.fail_once_at.iter().position(|&b| Some(b) == before);
         if let Some(i) = fail_once {
@@ -135,10 +171,10 @@ impl Channel {
         }
         let failing = self.fail_after.is_some_and(|n| self.requests.len() > n);
         if fail_once.is_some() || failing {
-            return Err(HistoryError::Other("источник недоступен".into()));
+            return Some(Err(HistoryError::Other("источник недоступен".into())));
         }
         let upper = before.unwrap_or(i64::MAX);
-        Ok(self
+        Some(Ok(self
             .messages
             .range(..upper)
             .rev()
@@ -148,7 +184,7 @@ impl Channel {
                 payload: payload(id, text),
                 payload_schema: PAYLOAD_SCHEMA.to_owned(),
             })
-            .collect())
+            .collect()))
     }
 }
 
@@ -158,7 +194,11 @@ impl HistorySource for FakeChannel {
         before: Option<i64>,
         limit: u32,
     ) -> Result<Vec<Message>, HistoryError> {
-        self.0.lock().unwrap().fetch_page(before, limit)
+        let response = self.0.lock().unwrap().fetch_page(before, limit);
+        match response {
+            Some(page) => page,
+            None => pending().await,
+        }
     }
 }
 
@@ -186,6 +226,18 @@ fn loader(
         clock.clone(),
         settings(),
     )
+}
+
+/// Процесс загрузчика, как его запускает команда: блокировка единственного
+/// экземпляра, затем подключение к источнику и проходы до остановки.
+async fn run_loader(
+    pool: &PgPool,
+    channel: &FakeChannel,
+    clock: &FakeClock,
+    shutdown: impl Future<Output = ()>,
+) -> Result<(), Error> {
+    let lock = loader::lock(&Storage::from_pool(pool.clone())).await?;
+    loader(pool, channel, clock).run(lock, shutdown).await
 }
 
 async fn stored_ids(pool: &PgPool) -> Vec<i64> {
@@ -363,7 +415,9 @@ async fn requests_are_paced_and_passes_repeat_with_poll_interval(pool: PgPool) {
     // завершается ошибкой и останавливает загрузчик.
     channel.fail_after(4);
 
-    loader(&pool, &channel, &clock).run().await.unwrap_err();
+    run_loader(&pool, &channel, &clock, pending())
+        .await
+        .unwrap_err();
 
     let delay = settings().request_delay;
     let interval = settings().poll_interval;
@@ -393,4 +447,73 @@ async fn requests_are_paced_and_passes_repeat_with_poll_interval(pool: PgPool) {
             },
         ]
     );
+}
+
+#[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
+async fn stop_signal_ends_loader_after_current_page_and_next_run_resumes(pool: PgPool) {
+    let clock = FakeClock::new();
+    let channel = FakeChannel::new(&clock);
+    channel.publish(1..=9);
+    // 9 8 7 | сигнал приходит, пока источник отвечает на второй запрос.
+    let stop = channel.stop_at_request(Some(7));
+
+    run_loader(&pool, &channel, &clock, stop).await.unwrap();
+
+    // Ответ на текущий запрос сохранён, новых запросов не было.
+    assert_eq!(channel.befores(), [None, Some(7)]);
+    assert_eq!(stored_ids(&pool).await, Vec::from_iter(4..=9));
+    assert_eq!(newest_fetched_id(&pool).await, None);
+
+    // 3 2 1 | пустая страница — проход завершён; сигнал приходит во время
+    // первого запроса следующего прохода.
+    let stop = channel.stop_at_request(None);
+    run_loader(&pool, &channel, &clock, stop).await.unwrap();
+
+    assert_eq!(channel.befores(), [None, Some(7), Some(4), Some(1), None]);
+    assert_eq!(stored_ids(&pool).await, Vec::from_iter(1..=9));
+    assert_eq!(newest_fetched_id(&pool).await, Some(9));
+}
+
+#[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
+async fn second_loader_exits_without_requests_while_first_is_running(pool: PgPool) {
+    let clock = FakeClock::new();
+    let first_channel = FakeChannel::new(&clock);
+    first_channel.publish(1..=9);
+    // Первый экземпляр ждёт ответа на второй запрос прохода.
+    let first_waits = first_channel.hang_at_request(7);
+    let (stop_first, first_stopped) = oneshot::channel::<()>();
+    let first = tokio::spawn({
+        let (pool, channel, clock) = (pool.clone(), first_channel.clone(), clock.clone());
+        async move {
+            let stop = async {
+                first_stopped.await.unwrap();
+            };
+            run_loader(&pool, &channel, &clock, stop).await
+        }
+    });
+    first_waits.await.unwrap();
+
+    let second_channel = FakeChannel::new(&clock);
+    second_channel.publish(1..=9);
+    let error = run_loader(&pool, &second_channel, &clock, pending())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, Error::AlreadyRunning), "{error:?}");
+    assert_eq!(second_channel.requests(), []);
+
+    // Первый останавливается, не дождавшись ответа; новый экземпляр берёт
+    // блокировку и продолжает проход.
+    stop_first.send(()).unwrap();
+    first.await.unwrap().unwrap();
+    let third_channel = FakeChannel::new(&clock);
+    third_channel.publish(1..=9);
+    let stop_third = third_channel.stop_at_request(Some(1));
+    run_loader(&pool, &third_channel, &clock, stop_third)
+        .await
+        .unwrap();
+
+    assert_eq!(third_channel.befores(), [Some(7), Some(4), Some(1)]);
+    assert_eq!(stored_ids(&pool).await, Vec::from_iter(1..=9));
+    assert_eq!(newest_fetched_id(&pool).await, Some(9));
 }
