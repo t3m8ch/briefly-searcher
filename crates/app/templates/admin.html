@@ -1,0 +1,106 @@
+<!doctype html>
+{#- Страница веб-админки: вариант G прототипа («systemctl status с журналом»).
+    `/` рендерит шаблон целиком, `/status` — только блок `status`. -#}
+{%- macro moment(m) -%}
+<time datetime="{{ m.iso }}">{{ m.utc }}</time>
+{%- endmacro -%}
+{%- macro event_row(e, future) -%}
+<div class="j-row{% if future %} future{% endif %}">
+  <span class="j-when">{% call moment(e.at) %}{% endcall %}</span><span class="j-rel">{{ e.at.relative }}</span>
+  <span class="j-mark"><i class="j-dot{% if future %} future{% endif %} {{ e.tone.class() }}"></i></span>
+  <span class="j-what"><span class="j-when-inline">{% call moment(e.at) %}{% endcall %} · {{ e.at.relative }}</span>{{ e.what }}</span>
+</div>
+{%- if let Some(note) = e.note %}
+<span class="j-gap"></span><div class="j-note {{ note.tone.class() }}">└ {{ note.text }}</div>
+{%- endif %}
+{%- endmacro %}
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>briefly-searcher status</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #0f1110; }
+  body { color: #d6dcd6; font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace; padding: 28px 16px; }
+  .box { max-width: 900px; margin: 0 auto; }
+  .t-ok { color: #6fd08f; } .t-warn { color: #f0b060; } .t-bad { color: #ff8a80; } .t-dim { color: #7c877c; }
+  .t-prompt { color: #7c877c; margin-bottom: 10px; }
+  .t-status { font-size: 18px; font-weight: 700; line-height: 1.35; }
+  .t-label { color: #9fb6ff; }
+  /* кружок состояния: CSS, а не символ ●; центр — на половине высоты заглавных букв (единица cap) */
+  .t-dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%; background: currentColor; margin-right: .4em;
+    vertical-align: .05em; vertical-align: calc(0.5cap - 0.3em); }
+  .head { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 16px; row-gap: 2px; margin: 8px 0 0 22px; }
+  .head b { color: #ecf0ec; }
+  .journal-title { margin: 26px 0 6px; color: #7c877c; }
+  /* журнал: время | относительно | метка на вертикальной линии | событие */
+  .j { display: grid; grid-template-columns: max-content max-content 22px minmax(0, 1fr); column-gap: 12px; }
+  .j-row { display: contents; }
+  .j-row > span { padding: 5px 0; }
+  .j-when { color: #aab3aa; }
+  .j-rel { color: #7c877c; text-align: right; }
+  .j-mark, .j-gap { background: linear-gradient(#2c332c, #2c332c) center / 1px 100% no-repeat; }
+  .j-mark { text-align: center; }
+  .j-gap { grid-column: 3; }
+  .j-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 2px solid currentColor; background: currentColor; box-shadow: 0 0 0 3px #0f1110;
+    vertical-align: 0; vertical-align: calc(0.5cap - 4.5px); }
+  .j-dot.future { background: #0f1110; }
+  .j-what { color: #ecf0ec; }
+  .j-row.future .j-what, .j-row.future .j-when { color: #aab3aa; }
+  .j-note { grid-column: 4; padding: 0 0 6px; white-space: pre-wrap; margin-top: -4px; }
+  .j-now { grid-column: 1 / -1; color: #9fb6ff; font-weight: 700; padding: 8px 0; white-space: nowrap; overflow: hidden; }
+  .j-now::after { content: " ──────────────────────────────────────────────────────────────────────────────────────"; font-weight: 400; }
+  .j-when-inline { display: none; }
+  @media (max-width: 640px) {
+    .head { grid-template-columns: minmax(0, 1fr); margin-left: 0; }
+    .head .t-label { margin-top: 6px; }
+    .j { grid-template-columns: 22px minmax(0, 1fr); }
+    .j-row > .j-when, .j-row > .j-rel { display: none; }
+    .j-when-inline { display: block; color: #7c877c; font-size: 12px; }
+    .j-note { grid-column: 2; } .j-gap { grid-column: 1; }
+  }
+</style>
+</head>
+<body>
+{#- Блок заменяется ответом /status раз в 5 с. Ответы 4xx/5xx и обрыв связи
+    htmx 2 не вставляет, поэтому на экране остаются последние данные. -#}
+<main class="box" id="status" hx-get="/status" hx-trigger="every 5s" hx-swap="innerHTML">
+{%- block status %}
+<div class="t-prompt">$ briefly-searcher status · сводка на {% call moment(s.now) %}{% endcall %}</div>
+<div class="t-status"><span class="t-dot {{ s.loader.tone.class() }}"></span>briefly-searcher loader — <span class="{{ s.loader.tone.class() }}">{{ s.loader.title }}</span></div>
+<div class="head">
+  <span class="t-label">Состояние:</span><span class="t-dim">{{ s.loader.why }}</span>
+  <span class="t-label">{{ s.history.label }}:</span><span><b>{{ s.history.main }}</b> <span class="t-dim">— {{ s.history.detail }}</span></span>
+  <span class="t-label">raw_posts:</span><span>{{ s.raw_posts }}</span>
+  <span class="t-label">newest_fetched_id:</span>
+  {%- if let Some(id) = s.newest_fetched_id %}<span>{{ id }}</span>{% else %}<span class="t-dim">NULL</span>{% endif %}
+</div>
+<div class="journal-title">Журнал:</div>
+<div class="j">
+{%- for e in s.future %}
+{% call event_row(e, true) %}{% endcall %}
+{%- endfor %}
+<div class="j-now">── сейчас · {% call moment(s.now) %}{% endcall %}</div>
+{%- for e in s.past %}
+{% call event_row(e, false) %}{% endcall %}
+{%- else %}
+<div class="j-row"><span class="j-when"></span><span class="j-rel"></span><span class="j-mark"></span><span class="j-what t-dim">событий ещё не было</span></div>
+{%- endfor %}
+</div>
+{% endblock -%}
+</main>
+<script src="/htmx.min.js"></script>
+<script>
+  // Единственный собственный скрипт: переводит времена из UTC в пояс браузера,
+  // при загрузке страницы и после каждого обновления /status. Без JS видно UTC.
+  htmx.onLoad(function (root) {
+    root.querySelectorAll('time[datetime]').forEach(function (el) {
+      el.textContent = new Date(el.dateTime).toLocaleString('ru-RU', {
+        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+      });
+    });
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ingestion_state SET flood_wait_until = '2099-01-02 03:04:05Z'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "f2bdf06837529ad10ac3d7cfa34d97cc5a2d77e714c443835d2fd134381352af"
+}

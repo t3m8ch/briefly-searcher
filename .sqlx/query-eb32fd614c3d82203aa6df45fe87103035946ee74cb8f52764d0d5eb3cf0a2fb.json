@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO raw_posts (message_id, payload, payload_schema) VALUES ($1, '{}', 'test')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eb32fd614c3d82203aa6df45fe87103035946ee74cb8f52764d0d5eb3cf0a2fb"
+}

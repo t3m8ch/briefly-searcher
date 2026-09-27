@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE worker_state SET last_heartbeat_at = now() - interval '4 seconds'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "67563f5bec0359b49bb05621999c88333099cfb2b0b0578628d3ec81bc09f830"
+}

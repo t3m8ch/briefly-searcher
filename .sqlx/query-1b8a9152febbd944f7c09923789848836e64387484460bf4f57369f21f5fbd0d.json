@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ingestion_state SET newest_fetched_id = 43870",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "1b8a9152febbd944f7c09923789848836e64387484460bf4f57369f21f5fbd0d"
+}

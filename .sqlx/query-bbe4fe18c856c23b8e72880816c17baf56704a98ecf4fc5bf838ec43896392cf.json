@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ingestion_state SET last_successful_request_at = '2026-09-27 03:00:00Z'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "bbe4fe18c856c23b8e72880816c17baf56704a98ecf4fc5bf838ec43896392cf"
+}

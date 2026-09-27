@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE worker_state SET last_heartbeat_at = now(),\n             last_error = 'Telegram: <b>timeout</b>',\n             last_error_at = '2026-09-27 03:00:00Z',\n             next_attempt_at = '2099-01-02 03:04:05Z'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "d6d4109e9775f3a2b307a110869b1b07dbfc00d83f0e3ad4ada7888facb47224"
+}

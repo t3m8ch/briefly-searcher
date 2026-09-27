@@ -1,0 +1,119 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                now() AS \"now!\",\n                i.newest_fetched_id,\n                -- Как в pass_state: без OR min() читает одну запись индекса.\n                (SELECT min(message_id) FROM raw_posts\n                  WHERE message_id > COALESCE(i.newest_fetched_id, 0)\n                ) AS pass_reached_id,\n                (SELECT count(*) FROM raw_posts) AS \"raw_posts_count!\",\n                i.flood_wait_until,\n                i.last_successful_request_at,\n                w.last_heartbeat_at,\n                w.last_error,\n                w.last_error_at,\n                w.next_attempt_at\n            FROM ingestion_state i CROSS JOIN worker_state w\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "now!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "newest_fetched_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ingestion_state",
+            "name": "newest_fetched_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "pass_reached_id",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "raw_posts_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "flood_wait_until",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ingestion_state",
+            "name": "flood_wait_until"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "last_successful_request_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ingestion_state",
+            "name": "last_successful_request_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "last_heartbeat_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "worker_state",
+            "name": "last_heartbeat_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "worker_state",
+            "name": "last_error"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "last_error_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "worker_state",
+            "name": "last_error_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "next_attempt_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "worker_state",
+            "name": "next_attempt_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      true,
+      null,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e4c8a4de03227339e1f9a1071b6b5a57b58ec339d224ea2253c2dc5c252f038f"
+}
