@@ -43,11 +43,11 @@ impl Clock for FakeClock {
 /// Запрос страницы, который загрузчик отправил источнику.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Request {
-    offset_id: i64,
+    before: Option<i64>,
     at: DateTime<Utc>,
 }
 
-/// Поддельный канал: отдаёт страницы по `offset_id` из своих сообщений,
+/// Поддельный канал: отдаёт страницы по `before` из своих сообщений,
 /// выполняет сценарий и ведёт журнал запросов.
 #[derive(Clone)]
 struct FakeChannel(Arc<Mutex<Channel>>);
@@ -57,10 +57,10 @@ struct Channel {
     /// Текст сообщения по его ID.
     messages: BTreeMap<i64, String>,
     requests: Vec<Request>,
-    /// `offset_id` запросов, которые один раз завершатся ошибкой.
+    /// `before` запросов, которые один раз завершатся ошибкой.
     fail_once_at: Vec<i64>,
     /// Сообщения, которые появятся в канале прямо перед ответом на запрос
-    /// с этим `offset_id` (один раз).
+    /// с этим `before` (один раз).
     publish_during: HashMap<i64, RangeInclusive<i64>>,
     /// Все запросы после этого числа завершаются ошибкой.
     fail_after: Option<usize>,
@@ -86,15 +86,15 @@ impl FakeChannel {
         self.0.lock().unwrap().messages.insert(id, text.to_owned());
     }
 
-    /// Запрос с этим `offset_id` один раз завершится ошибкой источника.
-    fn fail_once_at(&self, offset_id: i64) {
-        self.0.lock().unwrap().fail_once_at.push(offset_id);
+    /// Запрос с этим `before` один раз завершится ошибкой источника.
+    fn fail_once_at(&self, before: i64) {
+        self.0.lock().unwrap().fail_once_at.push(before);
     }
 
     /// Сообщения `ids` появятся в канале, пока загрузчик ждёт ответа на
-    /// запрос с этим `offset_id`.
-    fn publish_during_request(&self, offset_id: i64, ids: RangeInclusive<i64>) {
-        self.0.lock().unwrap().publish_during.insert(offset_id, ids);
+    /// запрос с этим `before`.
+    fn publish_during_request(&self, before: i64, ids: RangeInclusive<i64>) {
+        self.0.lock().unwrap().publish_during.insert(before, ids);
     }
 
     /// Все запросы после `requests`-го завершатся ошибкой источника.
@@ -106,9 +106,9 @@ impl FakeChannel {
         self.0.lock().unwrap().requests.clone()
     }
 
-    /// `offset_id` всех запросов по порядку.
-    fn offsets(&self) -> Vec<i64> {
-        self.requests().iter().map(|r| r.offset_id).collect()
+    /// `before` всех запросов по порядку.
+    fn befores(&self) -> Vec<Option<i64>> {
+        self.requests().iter().map(|r| r.before).collect()
     }
 }
 
@@ -119,13 +119,17 @@ impl Channel {
         }
     }
 
-    fn fetch_page(&mut self, offset_id: i64, limit: u32) -> Result<Vec<Message>, HistoryError> {
+    fn fetch_page(
+        &mut self,
+        before: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<Message>, HistoryError> {
         let at = self.clock.now();
-        self.requests.push(Request { offset_id, at });
-        if let Some(ids) = self.publish_during.remove(&offset_id) {
+        self.requests.push(Request { before, at });
+        if let Some(ids) = before.and_then(|b| self.publish_during.remove(&b)) {
             self.publish(ids);
         }
-        let fail_once = self.fail_once_at.iter().position(|&o| o == offset_id);
+        let fail_once = self.fail_once_at.iter().position(|&b| Some(b) == before);
         if let Some(i) = fail_once {
             self.fail_once_at.remove(i);
         }
@@ -133,7 +137,7 @@ impl Channel {
         if fail_once.is_some() || failing {
             return Err(HistoryError::Other("источник недоступен".into()));
         }
-        let upper = if offset_id == 0 { i64::MAX } else { offset_id };
+        let upper = before.unwrap_or(i64::MAX);
         Ok(self
             .messages
             .range(..upper)
@@ -149,8 +153,12 @@ impl Channel {
 }
 
 impl HistorySource for FakeChannel {
-    async fn fetch_page(&self, offset_id: i64, limit: u32) -> Result<Vec<Message>, HistoryError> {
-        self.0.lock().unwrap().fetch_page(offset_id, limit)
+    async fn fetch_page(
+        &self,
+        before: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<Message>, HistoryError> {
+        self.0.lock().unwrap().fetch_page(before, limit)
     }
 }
 
@@ -203,7 +211,7 @@ async fn first_pass_on_empty_database_saves_whole_history(pool: PgPool) {
     loader(&pool, &channel, &clock).run_pass().await.unwrap();
 
     // 8 7 6 | 5 4 3 | 2 1 | пустая страница — начало канала.
-    assert_eq!(channel.offsets(), [0, 6, 3, 1]);
+    assert_eq!(channel.befores(), [None, Some(6), Some(3), Some(1)]);
     assert_eq!(stored_ids(&pool).await, Vec::from_iter(1..=8));
     assert_eq!(newest_fetched_id(&pool).await, Some(8));
 
@@ -228,7 +236,7 @@ async fn next_pass_saves_two_pages_of_new_messages_and_stops_at_saved_ones(pool:
     loader.run_pass().await.unwrap();
 
     // 14 13 12 | 11 10 9 — на второй странице есть 9 ≤ newest_fetched_id.
-    assert_eq!(channel.offsets()[first_pass_requests..], [0, 12]);
+    assert_eq!(channel.befores()[first_pass_requests..], [None, Some(12)]);
     assert_eq!(stored_ids(&pool).await, Vec::from_iter(1..=14));
     assert_eq!(newest_fetched_id(&pool).await, Some(14));
 }
@@ -251,7 +259,7 @@ async fn interruption_before_last_page_commit_is_finished_by_next_run(pool: PgPo
     let before_restart = channel.requests().len();
     loader(&pool, &channel, &clock).run_pass().await.unwrap();
 
-    assert_eq!(channel.offsets()[before_restart..], [12]);
+    assert_eq!(channel.befores()[before_restart..], [Some(12)]);
     assert_eq!(stored_ids(&pool).await, Vec::from_iter(1..=14));
     assert_eq!(newest_fetched_id(&pool).await, Some(14));
 }
@@ -273,7 +281,7 @@ async fn new_loader_resumes_unfinished_first_pass(pool: PgPool) {
     let before_restart = channel.requests().len();
     loader(&pool, &channel, &clock).run_pass().await.unwrap();
 
-    assert_eq!(channel.offsets()[before_restart..], [4, 1]);
+    assert_eq!(channel.befores()[before_restart..], [Some(4), Some(1)]);
     assert_eq!(stored_ids(&pool).await, Vec::from_iter(1..=9));
     assert_eq!(newest_fetched_id(&pool).await, Some(9));
 }
@@ -301,7 +309,7 @@ async fn new_loader_resumes_unfinished_next_pass(pool: PgPool) {
     loader(&pool, &channel, &clock).run_pass().await.unwrap();
 
     // 13 12 11 | 10 9 8.
-    assert_eq!(channel.offsets()[before_restart..], [14, 11]);
+    assert_eq!(channel.befores()[before_restart..], [Some(14), Some(11)]);
     assert_eq!(stored_ids(&pool).await, Vec::from_iter(1..=16));
     assert_eq!(newest_fetched_id(&pool).await, Some(16));
 }
@@ -364,23 +372,23 @@ async fn requests_are_paced_and_passes_repeat_with_poll_interval(pool: PgPool) {
         channel.requests(),
         [
             Request {
-                offset_id: 0,
+                before: None,
                 at: t0
             },
             Request {
-                offset_id: 3,
+                before: Some(3),
                 at: t0 + delay
             },
             Request {
-                offset_id: 1,
+                before: Some(1),
                 at: first_pass_end
             },
             Request {
-                offset_id: 0,
+                before: None,
                 at: first_pass_end + interval
             },
             Request {
-                offset_id: 0,
+                before: None,
                 at: first_pass_end + interval * 2
             },
         ]

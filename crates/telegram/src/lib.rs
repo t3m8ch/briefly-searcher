@@ -1,11 +1,16 @@
-//! Доступ к Telegram: MTProto-клиент `grammers` и trait `HistorySource`.
+//! Доступ к Telegram: trait `HistorySource` и его реализация на публичной
+//! веб-ленте `t.me/s/<канал>` — [`WebFeed`] (ADR-0003).
 //!
-//! Crate не обращается к БД: сессию Telegram он читает и сохраняет через
-//! crate хранилища. Реализация на `grammers` появится вместе с командой `login`.
+//! Crate не обращается к БД. MTProto-реализация на `grammers` отложена, пока
+//! нельзя получить `api_id`/`api_hash`.
 
 use std::future::Future;
 
-/// Наибольший размер страницы, который принимает `messages.getHistory`.
+mod web_feed;
+
+pub use web_feed::{WebFeed, WebFeedSettings};
+
+/// Наибольший размер страницы: столько принимает `messages.getHistory`.
 pub const MAX_PAGE_SIZE: u32 = 100;
 
 /// Сообщение канала в том виде, в каком его сохраняет загрузчик.
@@ -13,18 +18,19 @@ pub const MAX_PAGE_SIZE: u32 = 100;
 pub struct Message {
     /// ID сообщения в Telegram; больший ID означает более позднюю публикацию.
     pub id: i64,
-    /// Декодированный объект сообщения, сериализованный в JSON (ADR-0001).
+    /// Исходник сообщения в JSON: у веб-ленты — `{"html": <HTML блока>}`
+    /// (ADR-0003), у MTProto — декодированный объект сообщения (ADR-0001).
     pub payload: serde_json::Value,
-    /// Чем записан `payload`: версия crate и TL layer, например
-    /// `grammers-tl-types 0.x / layer N`.
+    /// Чем записан `payload`, например `t.me/s html v1`.
     pub payload_schema: String,
 }
 
 /// Ошибка запроса страницы истории.
 #[derive(Debug, thiserror::Error)]
 pub enum HistoryError {
-    /// Telegram ответил `FLOOD_WAIT_X`: повторять запрос можно не раньше чем
-    /// через указанное число секунд.
+    /// Telegram ограничил частоту запросов (`FLOOD_WAIT_X` у MTProto, `429`
+    /// у веб-ленты): повторять запрос можно не раньше чем через указанное
+    /// число секунд.
     #[error("Telegram требует подождать {0} с (FLOOD_WAIT)")]
     FloodWait(u32),
     /// Прочая ошибка источника.
@@ -32,18 +38,27 @@ pub enum HistoryError {
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Источник истории канала: одна операция `messages.getHistory`.
+impl HistoryError {
+    /// Прочая ошибка источника из любой ошибки или текста:
+    /// `.map_err(HistoryError::other)`, `HistoryError::other("…")`.
+    pub fn other(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+        Self::Other(error.into())
+    }
+}
+
+/// Источник истории канала: одна операция «страница блоков раньше `before`»,
+/// как `t.me/s/<канал>?before=<ID>` или `messages.getHistory` с `offset_id`.
 ///
 /// Загрузчик зависит только от этого trait, поэтому тесты подставляют
 /// поддельный источник.
 pub trait HistorySource {
     /// Запрашивает **страницу**: до `limit` (не больше [`MAX_PAGE_SIZE`])
-    /// сообщений с ID строго меньше `offset_id`, от большего ID к меньшему.
-    /// `offset_id = 0` означает «без границы» — самые свежие сообщения канала.
+    /// сообщений с ID строго меньше `before`, от большего ID к меньшему.
+    /// `None` означает «без границы» — самые свежие сообщения канала.
     /// Пустая страница означает, что более ранних сообщений нет.
     fn fetch_page(
         &self,
-        offset_id: i64,
+        before: Option<i64>,
         limit: u32,
     ) -> impl Future<Output = Result<Vec<Message>, HistoryError>> + Send;
 }

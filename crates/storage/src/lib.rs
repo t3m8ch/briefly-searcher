@@ -28,10 +28,10 @@ pub struct PassState {
     /// Наибольший `message_id`, до которого все сообщения канала сохранены;
     /// `None`, пока первый проход не завершён.
     pub newest_fetched_id: Option<i64>,
-    /// `offset_id`, с которого продолжать незавершённый проход:
+    /// Граница `before`, с которой продолжать незавершённый проход:
     /// `min(message_id)` среди строк новее `newest_fetched_id` (при `None` —
     /// среди всех строк). `None`, если незавершённого прохода нет.
-    pub resume_offset_id: Option<i64>,
+    pub resume_before: Option<i64>,
 }
 
 /// Сообщение Telegram для вставки в `raw_posts`.
@@ -123,7 +123,7 @@ impl Storage {
                     SELECT min(p.message_id)
                     FROM raw_posts p
                     WHERE p.message_id > COALESCE(s.newest_fetched_id, 0)
-                ) AS resume_offset_id
+                ) AS resume_before
             FROM ingestion_state s
             "#
         )
