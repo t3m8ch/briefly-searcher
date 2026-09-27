@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO worker_state (singleton) VALUES (FALSE)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "d6bc2ebcc5562ddac3bb0b12b647fa5f2b663d7ca8717c3708042ee8bc738477"
+}
