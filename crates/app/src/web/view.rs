@@ -7,7 +7,7 @@ use crate::loader::{HEARTBEAT_INTERVAL, REQUEST_TIMEOUT};
 
 /// Heartbeat старше этого — загрузчик «не отвечает». Загрузчик пишет heartbeat
 /// не реже раза в [`HEARTBEAT_INTERVAL`] в любом состоянии, а запрос к Telegram
-/// ждёт не дольше [`REQUEST_TIMEOUT`]; порог — их удвоенная сумма, 90 с
+/// ждёт не дольше [`REQUEST_TIMEOUT`]; порог — их удвоенная сумма
 /// (docs/research/admin-panel.md).
 const HEARTBEAT_STALE_AFTER: TimeDelta =
     TimeDelta::seconds(2 * (HEARTBEAT_INTERVAL.num_seconds() + REQUEST_TIMEOUT.num_seconds()));
