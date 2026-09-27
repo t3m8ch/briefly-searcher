@@ -8,6 +8,7 @@ use std::future::Future;
 
 use chrono::{DateTime, Utc};
 
+/// Источник времени загрузчика.
 pub trait Clock {
     /// Текущее время.
     fn now(&self) -> DateTime<Utc>;

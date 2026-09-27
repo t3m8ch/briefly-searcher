@@ -36,9 +36,12 @@ pub struct PassState {
 
 /// Сообщение Telegram для вставки в `raw_posts`.
 #[derive(Clone, Copy, Debug)]
-pub struct RawPost<'a> {
+pub struct RawMessage<'a> {
+    /// ID сообщения в Telegram.
     pub message_id: i64,
+    /// Декодированный объект сообщения (ADR-0001).
     pub payload: &'a serde_json::Value,
+    /// Чем записан `payload`: версия crate и TL layer.
     pub payload_schema: &'a str,
 }
 
@@ -100,11 +103,11 @@ impl Storage {
     /// сохранённый `payload`.
     pub async fn save_page(
         &self,
-        page: &[RawPost<'_>],
+        page: &[RawMessage<'_>],
         fetched_at: DateTime<Utc>,
     ) -> Result<(), Error> {
         let mut tx = self.pool.begin().await?;
-        insert_raw_posts(&mut tx, page, fetched_at).await?;
+        insert_raw_messages(&mut tx, page, fetched_at).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -113,11 +116,11 @@ impl Storage {
     /// `newest_fetched_id` на наибольший сохранённый `message_id`.
     pub async fn finish_pass(
         &self,
-        last_page: &[RawPost<'_>],
+        last_page: &[RawMessage<'_>],
         fetched_at: DateTime<Utc>,
     ) -> Result<(), Error> {
         let mut tx = self.pool.begin().await?;
-        insert_raw_posts(&mut tx, last_page, fetched_at).await?;
+        insert_raw_messages(&mut tx, last_page, fetched_at).await?;
         sqlx::query!(
             "UPDATE ingestion_state SET newest_fetched_id = (SELECT max(message_id) FROM raw_posts)"
         )
@@ -128,19 +131,19 @@ impl Storage {
     }
 }
 
-async fn insert_raw_posts(
+async fn insert_raw_messages(
     tx: &mut Transaction<'_, Postgres>,
-    posts: &[RawPost<'_>],
+    messages: &[RawMessage<'_>],
     fetched_at: DateTime<Utc>,
 ) -> Result<(), Error> {
-    for post in posts {
+    for message in messages {
         sqlx::query!(
             "INSERT INTO raw_posts (message_id, payload, payload_schema, fetched_at)
              VALUES ($1, $2, $3, $4)
              ON CONFLICT (message_id) DO NOTHING",
-            post.message_id,
-            post.payload,
-            post.payload_schema,
+            message.message_id,
+            message.payload,
+            message.payload_schema,
             fetched_at,
         )
         .execute(&mut **tx)

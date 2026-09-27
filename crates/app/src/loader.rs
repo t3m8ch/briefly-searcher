@@ -7,7 +7,7 @@
 
 use std::convert::Infallible;
 
-use briefly_searcher_storage::{RawPost, Storage};
+use briefly_searcher_storage::{RawMessage, Storage};
 use briefly_searcher_telegram::{HistoryError, HistorySource, MAX_PAGE_SIZE, Message};
 use chrono::{DateTime, TimeDelta, Utc};
 
@@ -24,6 +24,7 @@ pub struct Settings {
     pub poll_interval: TimeDelta,
 }
 
+/// Ошибка, прервавшая проход.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("ошибка источника истории: {0}")]
@@ -43,6 +44,9 @@ pub struct Loader<S, C> {
 }
 
 impl<S: HistorySource, C: Clock> Loader<S, C> {
+    /// # Panics
+    ///
+    /// Если `settings.page_size` не в пределах от 1 до [`MAX_PAGE_SIZE`].
     pub fn new(storage: Storage, source: S, clock: C, settings: Settings) -> Self {
         assert!(
             (1..=MAX_PAGE_SIZE).contains(&settings.page_size),
@@ -76,17 +80,17 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
         let mut offset_id = state.resume_offset_id.unwrap_or(0);
         loop {
             let page = self.fetch_page(offset_id).await?;
-            let posts: Vec<_> = page.iter().map(raw_post).collect();
+            let messages: Vec<_> = page.iter().map(raw_message).collect();
             let fetched_at = self.clock.now();
             // Проход завершается на пустой странице (начало канала) или на
             // странице, где встретилось уже сохранённое сообщение.
             match page.iter().map(|m| m.id).min() {
                 Some(min_id) if state.newest_fetched_id.is_none_or(|newest| min_id > newest) => {
-                    self.storage.save_page(&posts, fetched_at).await?;
+                    self.storage.save_page(&messages, fetched_at).await?;
                     offset_id = min_id;
                 }
                 _ => {
-                    self.storage.finish_pass(&posts, fetched_at).await?;
+                    self.storage.finish_pass(&messages, fetched_at).await?;
                     return Ok(());
                 }
             }
@@ -110,8 +114,8 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
     }
 }
 
-fn raw_post(message: &Message) -> RawPost<'_> {
-    RawPost {
+fn raw_message(message: &Message) -> RawMessage<'_> {
+    RawMessage {
         message_id: message.id,
         payload: &message.payload,
         payload_schema: &message.payload_schema,

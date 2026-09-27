@@ -61,7 +61,7 @@ struct Channel {
     fail_once_at: Vec<i64>,
     /// Сообщения, которые появятся в канале прямо перед ответом на запрос
     /// с этим `offset_id` (один раз).
-    publish_at: HashMap<i64, RangeInclusive<i64>>,
+    publish_during: HashMap<i64, RangeInclusive<i64>>,
     /// Все запросы после этого числа завершаются ошибкой.
     fail_after: Option<usize>,
 }
@@ -73,7 +73,7 @@ impl FakeChannel {
             messages: BTreeMap::new(),
             requests: Vec::new(),
             fail_once_at: Vec::new(),
-            publish_at: HashMap::new(),
+            publish_during: HashMap::new(),
             fail_after: None,
         })))
     }
@@ -94,7 +94,7 @@ impl FakeChannel {
     /// Сообщения `ids` появятся в канале, пока загрузчик ждёт ответа на
     /// запрос с этим `offset_id`.
     fn publish_during_request(&self, offset_id: i64, ids: RangeInclusive<i64>) {
-        self.0.lock().unwrap().publish_at.insert(offset_id, ids);
+        self.0.lock().unwrap().publish_during.insert(offset_id, ids);
     }
 
     /// Все запросы после `requests`-го завершатся ошибкой источника.
@@ -118,28 +118,23 @@ impl Channel {
             self.messages.insert(id, format!("сообщение {id}"));
         }
     }
-}
 
-impl HistorySource for FakeChannel {
-    async fn fetch_page(&self, offset_id: i64, limit: u32) -> Result<Vec<Message>, HistoryError> {
-        let mut channel = self.0.lock().unwrap();
-        let at = channel.clock.now();
-        channel.requests.push(Request { offset_id, at });
-        if let Some(ids) = channel.publish_at.remove(&offset_id) {
-            channel.publish(ids);
+    fn fetch_page(&mut self, offset_id: i64, limit: u32) -> Result<Vec<Message>, HistoryError> {
+        let at = self.clock.now();
+        self.requests.push(Request { offset_id, at });
+        if let Some(ids) = self.publish_during.remove(&offset_id) {
+            self.publish(ids);
         }
-        let fail_once = channel.fail_once_at.iter().position(|&o| o == offset_id);
+        let fail_once = self.fail_once_at.iter().position(|&o| o == offset_id);
         if let Some(i) = fail_once {
-            channel.fail_once_at.remove(i);
+            self.fail_once_at.remove(i);
         }
-        let failing = channel
-            .fail_after
-            .is_some_and(|n| channel.requests.len() > n);
+        let failing = self.fail_after.is_some_and(|n| self.requests.len() > n);
         if fail_once.is_some() || failing {
             return Err(HistoryError::Other("источник недоступен".into()));
         }
         let upper = if offset_id == 0 { i64::MAX } else { offset_id };
-        Ok(channel
+        Ok(self
             .messages
             .range(..upper)
             .rev()
@@ -150,6 +145,12 @@ impl HistorySource for FakeChannel {
                 payload_schema: PAYLOAD_SCHEMA.to_owned(),
             })
             .collect())
+    }
+}
+
+impl HistorySource for FakeChannel {
+    async fn fetch_page(&self, offset_id: i64, limit: u32) -> Result<Vec<Message>, HistoryError> {
+        self.0.lock().unwrap().fetch_page(offset_id, limit)
     }
 }
 
