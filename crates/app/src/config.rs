@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 
+use briefly_searcher_telegram::ApiHash;
 use envconfig::Envconfig;
 
 /// Подключение к PostgreSQL — общая часть конфигурации всех команд.
@@ -19,6 +20,15 @@ pub struct WebConfig {
     /// Адрес, который слушает веб-админка; по умолчанию только loopback.
     #[envconfig(from = "WEB_ADDR", default = "127.0.0.1:3000")]
     pub addr: SocketAddr,
+}
+
+/// Приложение Telegram с my.telegram.org. `api_hash` — секрет, `Debug` его скрывает.
+#[derive(Debug, Envconfig)]
+pub struct TelegramConfig {
+    #[envconfig(from = "TELEGRAM_API_ID")]
+    pub api_id: i32,
+    #[envconfig(from = "TELEGRAM_API_HASH")]
+    pub api_hash: ApiHash,
 }
 
 #[cfg(test)]
@@ -61,6 +71,23 @@ mod tests {
         ]);
         let config = WebConfig::init_from_hashmap(&env).unwrap();
         assert_eq!(config.addr, "[::1]:8080".parse().unwrap());
+    }
+
+    #[test]
+    fn reads_telegram_credentials_and_hides_api_hash_from_debug() {
+        let env = HashMap::from([
+            ("TELEGRAM_API_ID".to_owned(), "123456".to_owned()),
+            (
+                "TELEGRAM_API_HASH".to_owned(),
+                "0123456789abcdef0123456789abcdef".to_owned(),
+            ),
+        ]);
+        let config = TelegramConfig::init_from_hashmap(&env).unwrap();
+
+        assert_eq!(config.api_id, 123456);
+        assert_eq!(config.api_hash.expose(), "0123456789abcdef0123456789abcdef");
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("0123456789abcdef"), "{debug}");
     }
 
     #[test]

@@ -193,6 +193,27 @@ impl Storage {
         .await?;
         Ok(summary)
     }
+
+    /// Сериализованная сессия `grammers` из `telegram_session`; `None`, пока
+    /// не выполнена команда `login`. Секрет: не выводить в логи и админку.
+    pub async fn telegram_session(&self) -> Result<Option<Vec<u8>>, Error> {
+        let session = sqlx::query_scalar!("SELECT session FROM telegram_session")
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(session)
+    }
+
+    /// Записывает сериализованную сессию `grammers`, заменяя прежнюю.
+    pub async fn save_telegram_session(&self, session: &[u8]) -> Result<(), Error> {
+        sqlx::query!(
+            "INSERT INTO telegram_session (session) VALUES ($1)
+             ON CONFLICT (singleton) DO UPDATE SET session = EXCLUDED.session, updated_at = now()",
+            session,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }
 
 async fn insert_raw_messages(

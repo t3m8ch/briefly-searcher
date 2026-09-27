@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT session FROM telegram_session",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "telegram_session",
+            "name": "session"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8f034a14ac0b97ee80316fe9b6911dc2ccbb9ea7980a9585c9e1c6e703258eb6"
+}

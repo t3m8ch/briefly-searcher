@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO telegram_session (session) VALUES ($1)\n             ON CONFLICT (singleton) DO UPDATE SET session = EXCLUDED.session, updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ebd9c06110545ef6a55defb5ba8839b9bfc25c4d246285fe6424f01d035887fc"
+}
