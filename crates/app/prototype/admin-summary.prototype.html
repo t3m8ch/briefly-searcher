@@ -1,0 +1,565 @@
+<!doctype html>
+<!--
+  ПРОТОТИП, выбросить. Issue #6 (веб-админка). Живёт только в ветке-прототипе, в main не попадает.
+  Переносимая часть — блок <script id="admin-summary"> (чистые функции без DOM): её логика
+  переезжает в функцию хранилища «сводка для админки» и шаблон. Симулятор загрузчика и страница вокруг — одноразовые.
+-->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сводка админки: прототип</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e3e3de;
+    --accent: #2f5bd3; --accent-soft: #e8eefc; --warn: #a15c00; --warn-soft: #fff4e0;
+    --bad: #b3261e; --bad-soft: #fdecea; --ok: #1e7a3c; --changed: #fff3b0;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161615; --panel: #1f1f1d; --ink: #ececea; --muted: #a0a09a; --line: #34342f;
+      --accent: #8aa8ff; --accent-soft: #232c45; --warn: #f0b060; --warn-soft: #3a2e1a;
+      --bad: #ff8a80; --bad-soft: #3d2220; --ok: #6fd08f; --changed: #4a4320;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  p { margin: 0 0 8px; }
+  code, pre { font-family: var(--mono); font-size: 13px; }
+  .intro { max-width: 860px; color: var(--muted); margin-bottom: 20px; }
+  .intro b { color: var(--ink); }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } .sticky { position: static !important; } }
+  .sticky { position: sticky; top: 12px; display: grid; gap: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .controls { display: grid; gap: 16px; }
+  .group { margin-bottom: 12px; }
+  .group:last-child { margin-bottom: 0; }
+  .group-title { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { font: inherit; font-size: 14px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    border-radius: 7px; padding: 6px 10px; cursor: pointer; text-align: left; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .note { margin-top: 12px; padding: 8px 10px; border-radius: 7px; background: var(--accent-soft); font-size: 14px; }
+  .note.refused { background: var(--warn-soft); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+  .tab { font-size: 13px; padding: 4px 9px; }
+  .tab.active { background: var(--accent-soft); border-color: var(--accent); }
+  .scenario-desc { font-size: 14px; margin-bottom: 6px; }
+  .watch { font-size: 14px; color: var(--muted); margin-bottom: 10px; }
+  .watch b { color: var(--ink); }
+  ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+  ol.steps li.done button { opacity: .55; }
+  ol.steps li.done::marker { color: var(--ok); }
+  /* экран админки */
+  .screen { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+  .screen-bar { font-size: 12px; color: var(--muted); padding: 6px 12px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .screen-bar .poll-bad { color: var(--bad); }
+  .screen-body { padding: 14px; display: grid; gap: 12px; }
+  .state-card { display: flex; gap: 12px; align-items: flex-start; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; margin-top: 7px; flex: none; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); } .dot.idle { background: var(--muted); }
+  .state-title { font-size: 20px; font-weight: 650; }
+  .state-sub { color: var(--muted); font-size: 14px; }
+  .banner { padding: 10px 12px; border-radius: 8px; background: var(--warn-soft); border-left: 4px solid var(--warn); }
+  .err { padding: 10px 12px; border-radius: 8px; background: var(--bad-soft); border-left: 4px solid var(--bad); }
+  .err pre { margin: 6px 0; white-space: pre-wrap; }
+  .err.past { background: transparent; border-left-color: var(--line); color: var(--muted); }
+  .history-main { font-size: 17px; font-weight: 600; }
+  .history-sub { color: var(--muted); font-size: 14px; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 14px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; }
+  /* строки БД */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { font-family: var(--mono); color: var(--muted); width: 48%; }
+  td.changed { background: var(--changed); }
+  .tbl-name { font-family: var(--mono); font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
+  .tbl-name:first-of-type { margin-top: 0; }
+  .facts { font-size: 13px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; }
+  .facts b { color: var(--ink); font-weight: 600; }
+  ul.log { margin: 0; padding-left: 18px; font-size: 13px; color: var(--muted); max-height: 190px; overflow: auto; }
+  ul.log li:last-child { color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Сводка веб-админки: прототип логики (issue #6)</h1>
+  <div class="intro">
+    <p><b>Вопрос.</b> Правильно ли одна функция «сводка для админки» выводит, что показать на экране, из строк
+      <code>ingestion_state</code>, <code>worker_state</code> и <code>raw_posts</code>? Особенно в неудобных сочетаниях:
+      загрузчик упал во время паузы Telegram, ошибка при уже наступившем времени повтора, прошедшая ошибка,
+      перезапуск посреди прохода, недоступный <code>/status</code>, корректная остановка.</p>
+    <p><b>Как пользоваться.</b> Слева: кнопки действий (загрузчик, Telegram, время, канал, веб-сервер) и готовые сценарии.
+      Справа: что видит человек в админке и что сейчас лежит в БД (жёлтым отмечено то, что изменило последнее действие).
+      После каждого действия страница «опрашивает» <code>/status</code>, как это делает HTMX раз в 5 с.
+      Канал в демо маленький: 1 286 сообщений с ID до 1 500 (в ID есть пропуски), страница — 100 сообщений.</p>
+    <p><b>Правила, которые проверяются</b> (из исследования и уточнений к issue): состояние выбирается по порядку
+      «ещё не запускался → не отвечает (heartbeat старше 90 с) → пауза Telegram → ошибка с будущим повтором → работает»;
+      ошибка прошедшая, если после неё был успешный запрос; heartbeat загрузчик пишет не реже раза в 15 с в любом состоянии.
+      Времена показаны в UTC (так страница выглядит без JS).</p>
+  </div>
+
+  <div class="grid">
+    <div class="controls">
+      <div class="panel">
+        <h2>Сценарии</h2>
+        <div class="tabs" id="tabs"></div>
+        <div id="scenario"></div>
+      </div>
+      <div class="panel">
+        <h2>Свободная игра</h2>
+        <div id="free"></div>
+        <div id="note"></div>
+      </div>
+      <div class="panel">
+        <h2>Что происходило</h2>
+        <ul class="log" id="log"></ul>
+      </div>
+    </div>
+
+    <div class="sticky">
+      <div>
+        <h2>Экран админки (<code>GET /</code>, блок сводки из <code>/status</code>)</h2>
+        <div class="screen" id="screen"></div>
+      </div>
+      <div class="panel">
+        <h2>Строки БД сейчас</h2>
+        <div id="db"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================================
+     ПЕРЕНОСИМЫЙ МОДУЛЬ: сводка для админки. Без DOM.
+     summaryRow(db, now)  — то, что вернёт один SQL-запрос хранилища (см. набросок в docs/research/admin-panel.md);
+     adminView(row)       — что показать: состояние загрузчика, пауза, ошибка, прогресс истории, факты.
+     ============================================================================ -->
+<script id="admin-summary">
+const HEARTBEAT_SILENT_AFTER_S = 90;
+
+// Аналог SELECT now(), поля ingestion_state и worker_state, count(*) и min(message_id) из raw_posts одним снимком.
+function summaryRow(db, now) {
+  const nf = db.ingestion_state.newest_fetched_id;
+  let passReached = null;
+  for (const id of db.raw_posts) {
+    if (nf === null || id > nf) passReached = passReached === null ? id : Math.min(passReached, id);
+  }
+  return {
+    now,
+    ...db.ingestion_state,
+    ...db.worker_state,
+    raw_posts_count: db.raw_posts.size,
+    pass_reached_id: passReached,
+  };
+}
+
+function adminView(r) {
+  const secondsSince = (t) => (r.now - t) / 1000;
+  const pauseActive = r.flood_wait_until !== null && r.flood_wait_until > r.now;
+  const errorIsPast = r.last_error !== null && r.last_successful_request_at !== null
+    && r.last_successful_request_at > r.last_error_at;
+
+  let loader;
+  if (r.last_heartbeat_at === null) {
+    loader = { kind: 'never', tone: 'idle', title: 'Загрузчик ещё не запускался', sub: 'Heartbeat не записан ни разу.' };
+  } else if (secondsSince(r.last_heartbeat_at) > HEARTBEAT_SILENT_AFTER_S) {
+    loader = { kind: 'silent', tone: 'bad', title: 'Загрузчик не отвечает',
+      sub: { text: 'Последний heartbeat: ', at: r.last_heartbeat_at } };
+  } else if (pauseActive) {
+    loader = { kind: 'paused', tone: 'warn', title: 'Пауза Telegram',
+      sub: { text: 'Telegram попросил подождать до ', at: r.flood_wait_until } };
+  } else if (r.last_error !== null && r.next_attempt_at !== null && r.next_attempt_at > r.now) {
+    loader = { kind: 'retrying', tone: 'bad', title: 'Ошибка, ждёт повтора',
+      sub: { text: 'Следующая попытка в ', at: r.next_attempt_at } };
+  } else {
+    loader = { kind: 'ok', tone: 'ok', title: 'Работает', sub: 'Процесс жив, основной цикл крутится.' };
+  }
+
+  const error = r.last_error === null ? null : {
+    past: errorIsPast, text: r.last_error, at: r.last_error_at,
+    nextAttemptAt: errorIsPast ? null : r.next_attempt_at,
+  };
+
+  let history;
+  if (r.newest_fetched_id === null && r.pass_reached_id === null) {
+    history = { kind: 'not_started', main: 'Загрузка истории ещё не начиналась', sub: null };
+  } else if (r.newest_fetched_id === null) {
+    history = { kind: 'first_pass', main: `Первый проход: дошёл до ID ${fmtId(r.pass_reached_id)}`,
+      sub: `Сохранено ${fmtId(r.raw_posts_count)} сообщений. Сколько осталось, заранее неизвестно.` };
+  } else if (r.pass_reached_id !== null) {
+    history = { kind: 'loaded_pass', main: `История загружена до ID ${fmtId(r.newest_fetched_id)}`,
+      sub: `Незавершённый проход за новыми сообщениями дошёл до ID ${fmtId(r.pass_reached_id)}.` };
+  } else {
+    history = { kind: 'loaded', main: `История загружена до ID ${fmtId(r.newest_fetched_id)}`, sub: 'Незавершённого прохода нет.' };
+  }
+
+  return {
+    asOf: r.now,
+    loader,
+    pause: pauseActive ? { until: r.flood_wait_until } : null,
+    error,
+    history,
+    facts: [
+      ['Сообщений в raw_posts', fmtId(r.raw_posts_count)],
+      ['Heartbeat', r.last_heartbeat_at],
+      ['Последний успешный запрос', r.last_successful_request_at],
+      ['newest_fetched_id', r.newest_fetched_id === null ? 'ещё нет' : fmtId(r.newest_fetched_id)],
+    ],
+  };
+}
+
+function fmtId(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+</script>
+
+<!-- ============================================================================
+     СИМУЛЯТОР (одноразовый, но тоже без DOM): мир = канал + БД + процессы + экран.
+     step(world, action) => world. Загрузчик ведёт проход по правилам docs/scraper-plan.md, раздел 1.
+     ============================================================================ -->
+<script id="simulator">
+const PAGE = 100;
+const T0 = Date.UTC(2026, 8, 27, 9, 0, 0);
+const CHANNEL = (() => { const a = []; for (let id = 1; id <= 1500; id++) if (id % 7 !== 0) a.push(id); return a; })();
+
+function initialWorld() {
+  const w = {
+    now: T0,
+    channel: CHANNEL.slice(),
+    db: {
+      raw_posts: new Set(),
+      ingestion_state: { newest_fetched_id: null, flood_wait_until: null, last_successful_request_at: null },
+      worker_state: { last_heartbeat_at: null, last_error: null, last_error_at: null, next_attempt_at: null },
+    },
+    loader: 'stopped', // stopped | running | hung
+    webUp: true,
+    screen: null,       // последний вставленный HTMX фрагмент (view)
+    lastPoll: null,     // { at, ok }
+    note: null,         // { text, refused }
+    log: ['БД после migrate: строки состояния есть, все поля пустые.'],
+  };
+  return poll(w);
+}
+
+function clone(w) {
+  return {
+    ...w,
+    channel: w.channel,
+    db: {
+      raw_posts: new Set(w.db.raw_posts),
+      ingestion_state: { ...w.db.ingestion_state },
+      worker_state: { ...w.db.worker_state },
+    },
+    log: w.log.slice(),
+  };
+}
+
+function poll(w) {
+  if (!w.webUp) return { ...w, lastPoll: { at: w.now, ok: false } };
+  return { ...w, screen: adminView(summaryRow(w.db, w.now)), lastPoll: { at: w.now, ok: true } };
+}
+
+function refuse(w, text) { w.note = { text, refused: true }; w.log.push('Отказ: ' + text); return w; }
+function done(w, text) { w.note = { text, refused: false }; w.log.push(text); return w; }
+
+function passState(db) {
+  const nf = db.ingestion_state.newest_fetched_id;
+  let min = null;
+  for (const id of db.raw_posts) if (nf === null || id > nf) min = min === null ? id : Math.min(min, id);
+  return { nf, offset: min === null ? 0 : min };
+}
+
+// Проверки перед запросом к Telegram; null — можно слать.
+function whyCannotRequest(w) {
+  const i = w.db.ingestion_state, s = w.db.worker_state;
+  if (w.loader === 'stopped') return 'загрузчик не запущен.';
+  if (w.loader === 'hung') return 'основной цикл загрузчика завис, запросы не идут.';
+  if (i.flood_wait_until !== null && i.flood_wait_until > w.now)
+    return `загрузчик ждёт конца паузы Telegram (${fmtTime(i.flood_wait_until)}), запрос не отправлен.`;
+  const errorIsPast = s.last_error !== null && i.last_successful_request_at !== null && i.last_successful_request_at > s.last_error_at;
+  if (s.last_error !== null && !errorIsPast && s.next_attempt_at !== null && s.next_attempt_at > w.now)
+    return `загрузчик ждёт времени повтора (${fmtTime(s.next_attempt_at)}), запрос не отправлен.`;
+  return null;
+}
+
+function requestPage(w, outcome) {
+  const why = whyCannotRequest(w);
+  if (why) return refuse(w, why);
+  w.now += 1000;
+  const i = w.db.ingestion_state, s = w.db.worker_state;
+  s.last_heartbeat_at = w.now;
+  const { nf, offset } = passState(w.db);
+  if (outcome === 'flood') {
+    const secs = w.pendingFlood;
+    i.flood_wait_until = w.now + secs * 1000;
+    return done(w, `Запрос offset_id = ${offset}: Telegram ответил FLOOD_WAIT_${secs}. Записан flood_wait_until.`);
+  }
+  if (outcome === 'error') {
+    s.last_error = 'Telegram: запрос не завершился за 30 с (timeout)';
+    s.last_error_at = w.now;
+    s.next_attempt_at = w.now + 60 * 1000;
+    return done(w, `Запрос offset_id = ${offset}: таймаут. Записаны last_error и next_attempt_at (+60 с).`);
+  }
+  const below = offset === 0 ? w.channel : w.channel.filter((id) => id < offset);
+  const page = below.slice(-PAGE).reverse();
+  for (const id of page) w.db.raw_posts.add(id);
+  i.last_successful_request_at = w.now;
+  const finished = page.length === 0 || (nf !== null && page.some((id) => id <= nf));
+  let text = page.length
+    ? `Запрос offset_id = ${offset}: страница ${page[0]}…${page[page.length - 1]} сохранена.`
+    : `Запрос offset_id = ${offset}: пустая страница — начало канала.`;
+  if (finished) {
+    i.newest_fetched_id = Math.max(...w.db.raw_posts);
+    text += ` Проход завершён, newest_fetched_id = ${i.newest_fetched_id}.`;
+  }
+  w.lastRequestFinishedPass = finished;
+  return done(w, text);
+}
+
+function step(world, action) {
+  let w = clone(world);
+  w.note = null;
+  const i = w.db.ingestion_state, s = w.db.worker_state;
+  switch (action.type) {
+    case 'start':
+      if (w.loader !== 'stopped') { refuse(w, 'второй экземпляр загрузчика сразу завершился: advisory-блокировка уже занята работающим процессом.'); break; }
+      w.loader = 'running'; s.last_heartbeat_at = w.now;
+      done(w, 'Загрузчик запущен, записал heartbeat.');
+      break;
+    case 'page': requestPage(w, 'ok'); break;
+    case 'flood': w.pendingFlood = action.seconds; requestPage(w, 'flood'); break;
+    case 'error': requestPage(w, 'error'); break;
+    case 'finish-pass': {
+      let n = 0;
+      w.lastRequestFinishedPass = false;
+      while (n < 100) {
+        if (whyCannotRequest(w)) { if (n === 0) requestPage(w, 'ok'); break; }
+        requestPage(w, 'ok'); n++;
+        if (w.lastRequestFinishedPass) break;
+      }
+      if (n > 0) { w.log.splice(w.log.length - n, n); done(w, `Загрузчик сделал ${n} запрос(ов) подряд. ${w.lastRequestFinishedPass ? 'Проход завершён, newest_fetched_id = ' + i.newest_fetched_id + '.' : ''}`); }
+      break;
+    }
+    case 'crash':
+      if (w.loader === 'stopped') { refuse(w, 'загрузчик и так не запущен.'); break; }
+      w.loader = 'stopped'; done(w, 'Процесс загрузчика упал (kill -9). В БД ничего не изменилось.'); break;
+    case 'sigterm':
+      if (w.loader === 'stopped') { refuse(w, 'загрузчик и так не запущен.'); break; }
+      w.loader = 'stopped'; done(w, 'Загрузчик корректно остановлен по SIGTERM. В БД ничего не изменилось: поля «остановлен» в схеме нет.'); break;
+    case 'hang':
+      if (w.loader !== 'running') { refuse(w, 'зависнуть может только работающий загрузчик.'); break; }
+      w.loader = 'hung'; done(w, 'Основной цикл загрузчика завис: процесс жив, heartbeat больше не пишется.'); break;
+    case 'wait':
+      w.now += action.seconds * 1000;
+      if (w.loader === 'running') s.last_heartbeat_at = w.now;
+      done(w, `Прошло ${action.label}.${w.loader === 'running' ? ' Загрузчик всё это время писал heartbeat.' : ''}`);
+      break;
+    case 'publish': {
+      const max = w.channel[w.channel.length - 1];
+      const add = []; let id = max;
+      while (add.length < action.count) { id++; if (id % 7 !== 0) add.push(id); }
+      w.channel = w.channel.concat(add);
+      done(w, `В канале вышло ${action.count} новых сообщений (ID ${add[0]}…${add[add.length - 1]}).`);
+      break;
+    }
+    case 'web-down': w.webUp = false; done(w, 'Веб-серверу недоступна БД: /status отвечает 500, HTMX не вставляет ответ.'); break;
+    case 'web-up': w.webUp = true; done(w, 'БД снова доступна веб-серверу.'); break;
+  }
+  return poll(w);
+}
+
+function fmtTime(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`;
+}
+</script>
+
+<!-- ============================================================================
+     СТРАНИЦА (одноразовая оболочка)
+     ============================================================================ -->
+<script>
+const FREE = [
+  ['Загрузчик', [
+    ['Запустить загрузчик', { type: 'start' }],
+    ['Запросить страницу', { type: 'page' }],
+    ['Запрашивать страницы до конца прохода', { type: 'finish-pass' }],
+    ['Упасть (kill -9)', { type: 'crash' }],
+    ['Остановить корректно (SIGTERM)', { type: 'sigterm' }],
+    ['Зависнуть (процесс жив)', { type: 'hang' }],
+  ]],
+  ['Ответ Telegram на следующий запрос', [
+    ['FLOOD_WAIT 5 мин', { type: 'flood', seconds: 300 }],
+    ['FLOOD_WAIT 2 ч', { type: 'flood', seconds: 7200 }],
+    ['Таймаут запроса (ошибка)', { type: 'error' }],
+  ]],
+  ['Время', [
+    ['+5 с', { type: 'wait', seconds: 5, label: '5 с' }],
+    ['+1 мин', { type: 'wait', seconds: 60, label: '1 мин' }],
+    ['+10 мин', { type: 'wait', seconds: 600, label: '10 мин' }],
+    ['+2 ч', { type: 'wait', seconds: 7200, label: '2 ч' }],
+  ]],
+  ['Канал и веб-сервер', [
+    ['В канале вышло 30 сообщений', { type: 'publish', count: 30 }],
+    ['В канале вышло 150 сообщений', { type: 'publish', count: 150 }],
+    ['/status начинает падать (500)', { type: 'web-down' }],
+    ['/status снова работает', { type: 'web-up' }],
+  ]],
+];
+const A = Object.fromEntries(FREE.flatMap(([, items]) => items.map(([label, a]) => [label, a])));
+const S = (label) => [label, A[label]];
+
+const SCENARIOS = [
+  {
+    title: 'Обычный путь',
+    desc: 'Свежая БД после migrate. Загрузчик проходит всю историю, потом в канале выходят новые сообщения, и второй проход их забирает.',
+    watch: 'Во время первого прохода прогресс показан как «дошёл до ID», без процента и знаменателя. <b>Число сообщений не равно максимальному ID</b>: в ID пропуски. Второй проход начинается с offset_id = 0 и заканчивается, как только встречает уже сохранённое.',
+    steps: [S('Запустить загрузчик'), S('Запросить страницу'), S('Запросить страницу'), S('+5 с'),
+      S('Запрашивать страницы до конца прохода'), S('В канале вышло 150 сообщений'), S('Запросить страницу'), S('Запросить страницу')],
+  },
+  {
+    title: 'Упал во время паузы',
+    desc: 'Telegram назначает паузу на 2 часа. Через минуту процесс загрузчика падает.',
+    watch: 'Пока процесс жив, заголовок «Пауза Telegram». Первые 90 с после падения экран ещё показывает паузу, потом заголовок <b>«Загрузчик не отвечает»</b>, хотя пауза ещё идёт: heartbeat проверяется раньше паузы. Баннер паузы при этом остаётся, потому что пауза тоже правда.',
+    steps: [S('Запустить загрузчик'), S('Запросить страницу'), S('FLOOD_WAIT 2 ч'), S('+1 мин'), S('Упасть (kill -9)'), S('+1 мин'), S('+1 мин'), S('+2 ч')],
+  },
+  {
+    title: 'Ошибка и повтор',
+    desc: 'Запрос падает по таймауту, загрузчик ждёт минуту и повторяет запрос успешно.',
+    watch: 'Сначала «Ошибка, ждёт повтора» с заметным блоком ошибки. Когда время повтора наступило, но повтор ещё не сделан, заголовок уже <b>«Работает»</b>, а блок ошибки остаётся заметным: так и задумано? После успешного запроса ошибка становится приглушённой и не исчезает.',
+    steps: [S('Запустить загрузчик'), S('Запросить страницу'), S('Таймаут запроса (ошибка)'), S('Запросить страницу'), S('+1 мин'), S('Запросить страницу'), S('+10 мин')],
+  },
+  {
+    title: 'Перезапуск посреди прохода',
+    desc: 'Первый проход прерывается падением. Позже загрузчик запускают снова.',
+    watch: 'После падения сводка честно говорит «первый проход дошёл до ID …»: это <b>незавершённый</b> проход, а не идущий. Сейчас «идёт ли он» видно только по заголовку. После перезапуска первый запрос идёт с offset_id = min(message_id), а не с 0.',
+    steps: [S('Запустить загрузчик'), S('Запросить страницу'), S('Запросить страницу'), S('Запросить страницу'), S('Упасть (kill -9)'), S('+10 мин'), S('Запустить загрузчик'), S('Запросить страницу')],
+  },
+  {
+    title: 'Незаконные действия',
+    desc: 'Попытки сделать то, чего загрузчик делать не должен: запрос во время паузы, запрос раньше времени повтора, второй экземпляр.',
+    watch: 'Каждое действие должно получить отказ, а БД не должна измениться (жёлтых ячеек нет). Сводка при этом остаётся прежней.',
+    steps: [S('Запустить загрузчик'), S('Запустить загрузчик'), S('FLOOD_WAIT 5 мин'), S('Запросить страницу'), S('+10 мин'), S('Таймаут запроса (ошибка)'), S('Запросить страницу'), S('+1 мин'), S('Запросить страницу')],
+  },
+  {
+    title: '/status недоступен',
+    desc: 'Веб-сервер теряет доступ к БД, /status отвечает 500. Пока экран не обновляется, загрузчик падает.',
+    watch: 'На экране остаются последние данные с заголовком <b>«Работает»</b>, хотя загрузчика уже нет. Выдаёт это только застывшая строка «Сводка на …». Достаточно ли её? Своего JS, который пометил бы данные как устаревшие, по спеке нет.',
+    steps: [S('Запустить загрузчик'), S('Запросить страницу'), S('/status начинает падать (500)'), S('+1 мин'), S('Упасть (kill -9)'), S('+10 мин'), S('/status снова работает')],
+  },
+  {
+    title: 'Корректная остановка',
+    desc: 'Загрузчик останавливают намеренно (SIGTERM), например на время обслуживания.',
+    watch: 'В схеме нет поля «остановлен», поэтому через 90 с админка показывает <b>«Загрузчик не отвечает»</b> — так же, как после падения. Это то, чего хочется, или остановке нужна своя отметка в worker_state?',
+    steps: [S('Запустить загрузчик'), S('Запросить страницу'), S('Остановить корректно (SIGTERM)'), S('+1 мин'), S('+1 мин')],
+  },
+];
+
+let world = initialWorld();
+let prevDb = null;
+let activeTab = 0;
+let stepIndex = 0;
+
+function dispatch(action) {
+  prevDb = snapshotDb(world);
+  world = step(world, action);
+  render();
+}
+
+function snapshotDb(w) {
+  const r = summaryRow(w.db, w.now);
+  return { ...w.db.ingestion_state, ...w.db.worker_state, raw_posts_count: r.raw_posts_count, pass_reached_id: r.pass_reached_id,
+    max_id: w.db.raw_posts.size ? Math.max(...w.db.raw_posts) : null };
+}
+
+function startScenario(i) {
+  activeTab = i; stepIndex = 0; prevDb = null;
+  world = initialWorld();
+  render();
+}
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const t = (ms) => ms === null ? '—' : `<time>${fmtTime(ms)}</time>`;
+const sub = (x) => typeof x === 'string' ? esc(x) : esc(x.text) + t(x.at);
+
+function renderScreen() {
+  const v = world.screen;
+  const bar = `<div class="screen-bar"><span>Сводка на ${t(v.asOf)}</span>` +
+    (world.lastPoll.ok ? `<span>опрос /status ${fmtTime(world.lastPoll.at)}: 200</span>`
+      : `<span class="poll-bad">опрос /status ${fmtTime(world.lastPoll.at)}: 500, на экране старые данные (эту строку реальная страница не покажет)</span>`) + `</div>`;
+  let body = `<div class="state-card"><span class="dot ${v.loader.tone}"></span><div>
+      <div class="state-title">${esc(v.loader.title)}</div><div class="state-sub">${sub(v.loader.sub)}</div></div></div>`;
+  if (v.pause) body += `<div class="banner"><b>Пауза Telegram до ${t(v.pause.until)}</b><br><span class="state-sub">FLOOD_WAIT: до этого времени запросы к Telegram не отправляются.</span></div>`;
+  if (v.error) {
+    body += v.error.past
+      ? `<div class="err past">Последняя ошибка была в ${t(v.error.at)}: <code>${esc(v.error.text)}</code>. После неё загрузчик работал успешно.</div>`
+      : `<div class="err"><b>Ошибка в ${t(v.error.at)}</b><pre>${esc(v.error.text)}</pre>Следующая попытка: ${t(v.error.nextAttemptAt)}</div>`;
+  }
+  body += `<div><div class="history-main">${esc(v.history.main)}</div>${v.history.sub ? `<div class="history-sub">${esc(v.history.sub)}</div>` : ''}</div>`;
+  body += `<dl>${v.facts.map(([k, val]) => `<dt>${esc(k)}</dt><dd>${typeof val === 'number' ? t(val) : val === null ? '—' : esc(val)}</dd>`).join('')}</dl>`;
+  document.getElementById('screen').innerHTML = bar + `<div class="screen-body">${body}</div>`;
+}
+
+function renderDb() {
+  const cur = snapshotDb(world);
+  const changed = (k) => prevDb && prevDb[k] !== cur[k] ? ' class="changed"' : '';
+  const fmt = (k, val) => val === null ? '<span style="color:var(--muted)">NULL</span>'
+    : (k.endsWith('_at') || k.endsWith('_until')) ? fmtTime(val) : esc(val);
+  const rows = (keys) => `<table>${keys.map((k) => `<tr><td>${k}</td><td${changed(k)}>${fmt(k, cur[k])}</td></tr>`).join('')}</table>`;
+  const loaderLabel = { stopped: 'не запущен', running: 'работает', hung: 'завис (процесс жив)' }[world.loader];
+  const channelMax = world.channel[world.channel.length - 1];
+  document.getElementById('db').innerHTML =
+    `<div class="facts"><span>Сейчас: <b>${fmtTime(world.now)}</b></span><span>Процесс загрузчика: <b>${loaderLabel}</b></span>
+      <span>В канале: <b>${fmtId(world.channel.length)}</b> сообщений, последний ID <b>${channelMax}</b></span></div>` +
+    `<div class="tbl-name">ingestion_state</div>` + rows(['newest_fetched_id', 'flood_wait_until', 'last_successful_request_at']) +
+    `<div class="tbl-name">worker_state</div>` + rows(['last_heartbeat_at', 'last_error', 'last_error_at', 'next_attempt_at']) +
+    `<div class="tbl-name">raw_posts (выводится запросом)</div>` +
+    `<table><tr><td>count(*)</td><td${changed('raw_posts_count')}>${fmtId(cur.raw_posts_count)}</td></tr>` +
+    `<tr><td>max(message_id)</td><td${changed('max_id')}>${fmt('max_id', cur.max_id)}</td></tr>` +
+    `<tr><td>min(message_id) новее newest_fetched_id</td><td${changed('pass_reached_id')}>${fmt('pass_reached_id', cur.pass_reached_id)}</td></tr></table>`;
+}
+
+function renderFree() {
+  document.getElementById('free').innerHTML = FREE.map(([title, items], gi) =>
+    `<div class="group"><div class="group-title">${esc(title)}</div><div class="btns">` +
+    items.map(([label], ii) => `<button data-free="${gi}:${ii}">${esc(label)}</button>`).join('') + `</div></div>`).join('');
+  const n = world.note;
+  document.getElementById('note').innerHTML = n ? `<div class="note ${n.refused ? 'refused' : ''}">${n.refused ? 'Отказ: ' : ''}${esc(n.text)}</div>` : '';
+}
+
+function renderScenario() {
+  document.getElementById('tabs').innerHTML = SCENARIOS.map((s, i) =>
+    `<button class="tab ${i === activeTab ? 'active' : ''}" data-tab="${i}">${esc(s.title)}</button>`).join('');
+  const s = SCENARIOS[activeTab];
+  document.getElementById('scenario').innerHTML =
+    `<div class="scenario-desc">${esc(s.desc)}</div><div class="watch"><b>На что смотреть.</b> ${s.watch}</div>` +
+    `<ol class="steps">${s.steps.map(([label], i) =>
+      `<li class="${i < stepIndex ? 'done' : ''}"><button data-step="${i}" ${i === stepIndex ? 'class="primary"' : 'disabled'}>${esc(label)}</button></li>`).join('')}</ol>` +
+    `<div style="margin-top:10px"><button data-tab="${activeTab}">Начать сценарий заново</button></div>`;
+}
+
+function render() {
+  renderScreen(); renderDb(); renderFree(); renderScenario();
+  document.getElementById('log').innerHTML = world.log.slice(-40).map((l) => `<li>${esc(l)}</li>`).join('');
+  const log = document.getElementById('log'); log.scrollTop = log.scrollHeight;
+}
+
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  if (b.dataset.free) { const [g, i] = b.dataset.free.split(':').map(Number); dispatch(FREE[g][1][i][1]); }
+  else if (b.dataset.tab !== undefined) startScenario(Number(b.dataset.tab));
+  else if (b.dataset.step !== undefined) { const s = SCENARIOS[activeTab].steps[stepIndex]; stepIndex++; dispatch(s[1]); }
+});
+
+render();
+</script>
+</body>
+</html>
