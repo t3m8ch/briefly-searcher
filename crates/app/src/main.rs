@@ -3,13 +3,24 @@
 mod config;
 
 use anyhow::Context;
+use briefly_searcher::clock::SystemClock;
+use briefly_searcher::loader::{self, Loader};
 use briefly_searcher::web;
 use briefly_searcher_storage::Storage;
+use briefly_searcher_telegram::{WebFeed, WebFeedSettings};
+use chrono::TimeDelta;
 use clap::{Parser, Subcommand};
 use envconfig::Envconfig;
 use tracing_subscriber::EnvFilter;
 
-use crate::config::{DatabaseConfig, WebConfig};
+use crate::config::{DatabaseConfig, LoaderConfig, WebConfig};
+
+/// Адрес Telegram, у которого загрузчик читает веб-ленту `/s/<канал>`.
+const TELEGRAM_BASE_URL: &str = "https://t.me";
+
+/// Сколько блоков загрузчик просит у ленты за раз. Лента отдаёт около 20
+/// сообщений и размер страницы не принимает, поэтому это лишь верхняя граница.
+const PAGE_SIZE: u32 = 100;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -22,6 +33,9 @@ struct Cli {
 enum Command {
     /// Применить миграции схемы к БД из DATABASE_URL и завершиться.
     Migrate,
+    /// Загружать веб-ленту канала TELEGRAM_CHANNEL в БД, повторяя проходы
+    /// с интервалом опроса.
+    Loader,
     /// Запустить веб-админку только для чтения на WEB_ADDR (по умолчанию 127.0.0.1:3000).
     Web,
 }
@@ -38,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
 
     match Cli::parse().command {
         Command::Migrate => migrate().await,
+        Command::Loader => run_loader().await,
         Command::Web => serve_web().await,
     }
 }
@@ -49,6 +64,45 @@ async fn migrate() -> anyhow::Result<()> {
     tracing::info!("применяю миграции");
     storage.migrate().await.context("команда migrate")?;
     tracing::info!("миграции применены");
+    Ok(())
+}
+
+async fn run_loader() -> anyhow::Result<()> {
+    let config =
+        LoaderConfig::init_from_env().context("не удалось прочитать конфигурацию из окружения")?;
+    let storage = Storage::connect(&config.database.database_url).await?;
+    // Блокировка — до создания источника: второй экземпляр завершается, не
+    // обратившись к Telegram.
+    let lock = loader::lock(&storage).await.inspect_err(|error| {
+        tracing::error!(%error, "загрузчик не запущен");
+    })?;
+    let source = WebFeed::new(WebFeedSettings {
+        base_url: TELEGRAM_BASE_URL.to_owned(),
+        channel: config.channel.clone(),
+        flood_wait_secs: config.flood_wait_secs,
+    })
+    .map_err(|error| anyhow::anyhow!(error))
+    .context("не удалось создать источник на веб-ленте")?;
+    let settings = loader::Settings {
+        page_size: PAGE_SIZE,
+        request_delay: TimeDelta::seconds(config.request_delay_secs.into()),
+        poll_interval: TimeDelta::seconds(config.poll_interval_secs.into()),
+    };
+    tracing::info!(
+        channel = %config.channel,
+        poll_interval_secs = config.poll_interval_secs,
+        request_delay_secs = config.request_delay_secs,
+        flood_wait_secs = config.flood_wait_secs,
+        "загрузчик запущен"
+    );
+    // До устойчивости к ошибкам загрузчик завершается на первой ошибке
+    // источника или БД. Блокировку `run` снимает сам при любом исходе.
+    Loader::new(storage, source, SystemClock, settings)
+        .run(lock, shutdown_signal())
+        .await
+        .inspect_err(|error| tracing::error!(%error, "загрузчик остановлен ошибкой"))
+        .context("команда loader")?;
+    tracing::info!("загрузчик остановлен");
     Ok(())
 }
 
@@ -102,7 +156,7 @@ async fn shutdown_signal() {
         () = interrupt => {}
         () = terminate => {}
     }
-    tracing::info!("получен сигнал остановки, дорабатываю текущие запросы");
+    tracing::info!("получен сигнал остановки, завершаю текущую работу");
 }
 
 /// Подгружает локальный `.env`, если он есть: удобство разработки.

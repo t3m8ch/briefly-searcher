@@ -111,8 +111,12 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
     async fn run_passes(&mut self, shutdown: impl Future<Output = ()>) -> Result<(), Error> {
         let mut shutdown = pin!(shutdown);
         loop {
-            if self.pass(shutdown.as_mut()).await?.is_break() {
-                return Ok(());
+            match self.pass(shutdown.as_mut()).await? {
+                ControlFlow::Continue(saved) => tracing::info!(saved, "проход завершён"),
+                ControlFlow::Break(saved) => {
+                    tracing::info!(saved, "проход остановлен по сигналу");
+                    return Ok(());
+                }
             }
             let next_pass_at = self.clock.now() + self.settings.poll_interval;
             let sleep = self.clock.sleep_until(next_pass_at);
@@ -126,23 +130,28 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
     /// самых свежих сообщений. Каждая страница сохраняется одной транзакцией;
     /// последняя — вместе со сдвигом `newest_fetched_id`. Если проход прерван
     /// ошибкой, следующий вызов продолжит его с первой несохранённой страницы.
-    pub async fn run_pass(&mut self) -> Result<(), Error> {
-        let _: ControlFlow<()> = self.pass(pin!(pending())).await?;
-        Ok(())
+    ///
+    /// Возвращает, сколько сообщений этот вызов сохранил впервые.
+    pub async fn run_pass(&mut self) -> Result<u64, Error> {
+        let (ControlFlow::Continue(saved) | ControlFlow::Break(saved)) =
+            self.pass(pin!(pending())).await?;
+        Ok(saved)
     }
 
     /// Проход, который прекращается без новых запросов к источнику, когда
-    /// завершается `shutdown`; тогда возвращает `Break`.
+    /// завершается `shutdown`; тогда возвращает `Break`. В обоих случаях —
+    /// сколько сообщений сохранено впервые.
     async fn pass(
         &mut self,
         mut shutdown: Pin<&mut impl Future<Output = ()>>,
-    ) -> Result<ControlFlow<()>, Error> {
+    ) -> Result<ControlFlow<u64, u64>, Error> {
         let state = self.storage.pass_state().await?;
         let mut before = state.resume_before;
+        let mut saved = 0;
         loop {
             let fetch = self.fetch_page(before);
             let ControlFlow::Continue(page) = unless_stopped(shutdown.as_mut(), fetch).await else {
-                return Ok(ControlFlow::Break(()));
+                return Ok(ControlFlow::Break(saved));
             };
             let page = page?;
             let messages: Vec<_> = page.iter().map(raw_message).collect();
@@ -151,12 +160,12 @@ impl<S: HistorySource, C: Clock> Loader<S, C> {
             // странице, где встретилось уже сохранённое сообщение.
             match page.iter().map(|m| m.id).min() {
                 Some(min_id) if state.newest_fetched_id.is_none_or(|newest| min_id > newest) => {
-                    self.storage.save_page(&messages, fetched_at).await?;
+                    saved += self.storage.save_page(&messages, fetched_at).await?;
                     before = Some(min_id);
                 }
                 _ => {
-                    self.storage.finish_pass(&messages, fetched_at).await?;
-                    return Ok(ControlFlow::Continue(()));
+                    saved += self.storage.finish_pass(&messages, fetched_at).await?;
+                    return Ok(ControlFlow::Continue(saved));
                 }
             }
         }
