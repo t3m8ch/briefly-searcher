@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "ALTER TABLE raw_posts ADD CONSTRAINT reject_5 CHECK (message_id <> 5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "586b97b3274b66533b1dc3c241625cb6e623bfb3f007b05eff3ae813d5c671bb"
+}

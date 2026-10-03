@@ -3,10 +3,14 @@
 use briefly_searcher_storage::AdminSummary;
 use chrono::{DateTime, SecondsFormat, TimeDelta, Utc};
 
+use crate::loader::{HEARTBEAT_INTERVAL, REQUEST_TIMEOUT};
+
 /// Heartbeat старше этого — загрузчик «не отвечает». Загрузчик пишет heartbeat
-/// не реже раза в 15 с в любом состоянии, а у запроса к Telegram таймаут 30 с;
-/// порог берётся с запасом от их суммы (docs/research/admin-panel.md).
-const HEARTBEAT_STALE_AFTER: TimeDelta = TimeDelta::seconds(90);
+/// не реже раза в [`HEARTBEAT_INTERVAL`] в любом состоянии, а запрос к Telegram
+/// ждёт не дольше [`REQUEST_TIMEOUT`]; порог — их удвоенная сумма
+/// (docs/research/admin-panel.md).
+const HEARTBEAT_STALE_AFTER: TimeDelta =
+    TimeDelta::seconds(2 * (HEARTBEAT_INTERVAL.num_seconds() + REQUEST_TIMEOUT.num_seconds()));
 
 /// Сводка в виде, готовом для шаблона.
 pub struct StatusView {

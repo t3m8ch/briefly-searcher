@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT last_successful_request_at FROM ingestion_state",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "last_successful_request_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ingestion_state",
+            "name": "last_successful_request_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "a2b1a211d395c981a8b5aed3fe38cf06a14ce3ddce6e8a31fd3ddb2f2ef0a61f"
+}

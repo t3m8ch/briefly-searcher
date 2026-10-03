@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE worker_state SET last_heartbeat_at = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "07d11f9fca5bcef86609421e3d679f82d7eb3729f3b9daca492268b7ed0619a7"
+}

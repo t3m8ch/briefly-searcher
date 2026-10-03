@@ -184,8 +184,9 @@ impl Storage {
         Ok(state)
     }
 
-    /// Сохраняет страницу прохода одной транзакцией и возвращает, сколько
-    /// сообщений записано впервые.
+    /// Сохраняет страницу прохода одной транзакцией, отмечает `fetched_at`
+    /// как время последнего успешного запроса к Telegram и возвращает,
+    /// сколько сообщений записано впервые.
     ///
     /// Уже сохранённые сообщения не переписываются: остаётся впервые
     /// сохранённый `payload`.
@@ -196,13 +197,15 @@ impl Storage {
     ) -> Result<u64, Error> {
         let mut tx = self.pool.begin().await?;
         let saved = insert_raw_messages(&mut tx, page, fetched_at).await?;
+        record_successful_request(&mut tx, fetched_at).await?;
         tx.commit().await?;
         Ok(saved)
     }
 
     /// Сохраняет последнюю страницу прохода и в той же транзакции сдвигает
-    /// `newest_fetched_id` на наибольший сохранённый `message_id`. Возвращает,
-    /// сколько сообщений страницы записано впервые.
+    /// `newest_fetched_id` на наибольший сохранённый `message_id`. Как и
+    /// [`Storage::save_page`], отмечает время последнего успешного запроса.
+    /// Возвращает, сколько сообщений страницы записано впервые.
     pub async fn finish_pass(
         &self,
         last_page: &[RawMessage<'_>],
@@ -210,6 +213,7 @@ impl Storage {
     ) -> Result<u64, Error> {
         let mut tx = self.pool.begin().await?;
         let saved = insert_raw_messages(&mut tx, last_page, fetched_at).await?;
+        record_successful_request(&mut tx, fetched_at).await?;
         sqlx::query!(
             "UPDATE ingestion_state SET newest_fetched_id = (SELECT max(message_id) FROM raw_posts)"
         )
@@ -217,6 +221,53 @@ impl Storage {
         .await?;
         tx.commit().await?;
         Ok(saved)
+    }
+
+    /// Срок паузы после `FLOOD_WAIT`, записанный последним; может быть уже в
+    /// прошлом.
+    pub async fn flood_wait_until(&self) -> Result<Option<DateTime<Utc>>, Error> {
+        let until = sqlx::query_scalar!("SELECT flood_wait_until FROM ingestion_state")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(until)
+    }
+
+    /// Записывает срок паузы после `FLOOD_WAIT`: до него загрузчик не
+    /// обращается к Telegram, в том числе после перезапуска.
+    pub async fn set_flood_wait_until(&self, until: DateTime<Utc>) -> Result<(), Error> {
+        sqlx::query!("UPDATE ingestion_state SET flood_wait_until = $1", until)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Записывает heartbeat загрузчика: его основной цикл жив.
+    pub async fn record_heartbeat(&self, at: DateTime<Utc>) -> Result<(), Error> {
+        sqlx::query!("UPDATE worker_state SET last_heartbeat_at = $1", at)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Записывает ошибку загрузчика и время следующей попытки.
+    ///
+    /// Прошлая ошибка заменяется новой; успешные запросы её не очищают.
+    pub async fn record_error(
+        &self,
+        error: &str,
+        at: DateTime<Utc>,
+        next_attempt_at: DateTime<Utc>,
+    ) -> Result<(), Error> {
+        sqlx::query!(
+            "UPDATE worker_state
+             SET last_error = $1, last_error_at = $2, next_attempt_at = $3",
+            error,
+            at,
+            next_attempt_at,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// Собирает сводку для веб-админки.
@@ -271,4 +322,17 @@ async fn insert_raw_messages(
         .rows_affected();
     }
     Ok(inserted)
+}
+
+async fn record_successful_request(
+    tx: &mut Transaction<'_, Postgres>,
+    at: DateTime<Utc>,
+) -> Result<(), Error> {
+    sqlx::query!(
+        "UPDATE ingestion_state SET last_successful_request_at = $1",
+        at
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }

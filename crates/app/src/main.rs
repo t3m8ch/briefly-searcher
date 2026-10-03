@@ -22,6 +22,9 @@ const TELEGRAM_BASE_URL: &str = "https://t.me";
 /// сообщений и размер страницы не принимает, поэтому это лишь верхняя граница.
 const PAGE_SIZE: u32 = 100;
 
+/// Пауза между ошибкой источника или БД и следующей попыткой.
+const RETRY_DELAY: TimeDelta = TimeDelta::minutes(1);
+
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
@@ -87,6 +90,7 @@ async fn run_loader() -> anyhow::Result<()> {
         page_size: PAGE_SIZE,
         request_delay: TimeDelta::seconds(config.request_delay_secs.into()),
         poll_interval: TimeDelta::seconds(config.poll_interval_secs.into()),
+        retry_delay: RETRY_DELAY,
     };
     tracing::info!(
         channel = %config.channel,
@@ -95,8 +99,8 @@ async fn run_loader() -> anyhow::Result<()> {
         flood_wait_secs = config.flood_wait_secs,
         "загрузчик запущен"
     );
-    // До устойчивости к ошибкам загрузчик завершается на первой ошибке
-    // источника или БД. Блокировку `run` снимает сам при любом исходе.
+    // Ошибки источника и БД загрузчик записывает и повторяет попытку сам;
+    // `run` возвращается по сигналу остановки и сам снимает блокировку.
     Loader::new(storage, source, SystemClock, settings)
         .run(lock, shutdown_signal())
         .await
