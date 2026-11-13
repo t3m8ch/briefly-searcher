@@ -47,82 +47,108 @@ pub enum ArticleStatus {
 pub fn normalize(messages: &[ParsedMessage]) -> Normalized {
     let mut messages: Vec<_> = messages.iter().collect();
     messages.sort_by_key(|m| m.id);
-    let mut posts: Vec<Post> = Vec::new();
-    let mut open: Vec<usize> = Vec::new();
-    let mut articles: Vec<BuildingArticle> = Vec::new();
+    let mut normalizer = Normalizer::default();
     for message in messages {
-        if matches!(message.kind, MessageKind::Service | MessageKind::Poll)
-            || message.text.trim().is_empty()
-        {
-            continue;
+        let has_visible_text = !message.text.trim().is_empty();
+        let is_publication = !matches!(message.kind, MessageKind::Service | MessageKind::Poll);
+        if is_publication && has_visible_text {
+            normalizer.add_message(message);
         }
+    }
+    normalizer.finish()
+}
+
+/// Состояние одного пересчёта. Индексы открытых статей ссылаются в articles;
+/// сами статьи не удаляются и сохраняют порядок создания (по ID).
+#[derive(Default)]
+struct Normalizer {
+    posts: Vec<Post>,
+    articles: Vec<BuildingArticle>,
+    open_articles: Vec<usize>,
+}
+
+impl Normalizer {
+    fn add_message(&mut self, message: &ParsedMessage) {
         let text = strip_footer(&message.text);
         let marker = Marker::parse(&text);
-        open.retain(|&index| {
-            let article = &articles[index];
-            message.published_at.signed_duration_since(article.last_at) <= Duration::hours(24)
-                && article
-                    .declared_parts
-                    .is_none_or(|total| article.last_ordinal() < total)
-        });
-        let target = marker.as_ref().and_then(|marker| {
-            open.iter()
-                .rev()
-                .copied()
-                .find(|&index| articles[index].accepts(marker, message.published_at))
-        });
-        let target = target.or_else(|| {
-            let marker = marker.as_ref().filter(|m| m.number == 2)?;
-            let reply = message.reply_to?;
-            let post_index = posts.binary_search_by_key(&reply, |p| p.message_id).ok()?;
-            if posts[post_index].part_no.is_some() {
-                return None;
-            }
-            let index = articles.binary_search_by_key(&reply, |a| a.id).ok()?;
-            let article = &mut articles[index];
-            article.title = Some(marker.title.clone());
-            article.normalized_title = normalize_title(&marker.title);
-            article.parts[0] = Some(1);
-            posts[post_index].part_no = Some(1);
-            Some(index)
-        });
-        let target = target.unwrap_or_else(|| {
-            articles.push(BuildingArticle::new(message, marker.as_ref()));
-            articles.len() - 1
-        });
-        if marker.is_some() && !open.contains(&target) {
-            open.push(target);
-        }
-        let article = &mut articles[target];
-        let part_no = marker.as_ref().map(|m| {
-            let ordinal = if article.parts.is_empty() {
-                m.number
-            } else {
-                article.last_ordinal() + 1
-            };
-            article.last_number = Some(m.number);
-            article.last_at = message.published_at;
-            article.declared_parts = article.declared_parts.max(m.total);
-            ordinal
-        });
-        article.bodies.push(
-            marker
-                .as_ref()
-                .map_or_else(|| text.clone(), |m| m.body.clone()),
-        );
-        article.parts.push(part_no);
-        posts.push(Post {
-            message_id: message.id,
-            article_id: article.id,
-            part_no,
-            text,
-            published_at: message.published_at,
-            forwarded_from: message.forwarded_from.clone(),
-        });
+        self.close_finished_articles(message.published_at);
+        let article_index = self.find_or_create_article(message, marker.as_ref());
+        let article = &mut self.articles[article_index];
+        let post = article.add_post(message, text, marker.as_ref());
+        self.posts.push(post);
     }
-    Normalized {
-        posts,
-        articles: articles.into_iter().map(BuildingArticle::finish).collect(),
+
+    fn close_finished_articles(&mut self, at: DateTime<Utc>) {
+        self.open_articles
+            .retain(|&index| self.articles[index].is_open_at(at));
+    }
+
+    fn find_or_create_article(
+        &mut self,
+        message: &ParsedMessage,
+        marker: Option<&Marker>,
+    ) -> usize {
+        if let Some(marker) = marker {
+            if let Some(index) = self.find_open_article(marker, message.published_at) {
+                return index;
+            }
+            if let Some(index) = self.restore_first_part_from_reply(message, marker) {
+                self.open_articles.push(index);
+                return index;
+            }
+        }
+
+        let index = self.articles.len();
+        self.articles.push(BuildingArticle::new(message, marker));
+        if marker.is_some() {
+            self.open_articles.push(index);
+        }
+        index
+    }
+
+    fn find_open_article(&self, marker: &Marker, at: DateTime<Utc>) -> Option<usize> {
+        self.open_articles
+            .iter()
+            .rev()
+            .copied()
+            .find(|&index| self.articles[index].accepts(marker, at))
+    }
+
+    fn restore_first_part_from_reply(
+        &mut self,
+        message: &ParsedMessage,
+        marker: &Marker,
+    ) -> Option<usize> {
+        if marker.number != 2 {
+            return None;
+        }
+        let reply_id = message.reply_to?;
+        let post_index = self
+            .posts
+            .binary_search_by_key(&reply_id, |post| post.message_id)
+            .ok()?;
+        if self.posts[post_index].part_no.is_some() {
+            return None;
+        }
+        // Пост без маркера пока образует одиночную статью с тем же ID.
+        let article_index = self
+            .articles
+            .binary_search_by_key(&reply_id, |article| article.id)
+            .ok()?;
+        self.articles[article_index].restore_first_part(marker);
+        self.posts[post_index].part_no = Some(1);
+        Some(article_index)
+    }
+
+    fn finish(self) -> Normalized {
+        Normalized {
+            posts: self.posts,
+            articles: self
+                .articles
+                .into_iter()
+                .map(BuildingArticle::finish)
+                .collect(),
+        }
     }
 }
 
@@ -154,14 +180,62 @@ impl BuildingArticle {
         }
     }
 
+    fn is_open_at(&self, at: DateTime<Utc>) -> bool {
+        let within_time_window = at.signed_duration_since(self.last_at) <= Duration::hours(24);
+        let expects_more_parts = self
+            .declared_parts
+            .is_none_or(|total| self.last_ordinal() < total);
+        within_time_window && expects_more_parts
+    }
+
+    fn restore_first_part(&mut self, marker: &Marker) {
+        self.title = Some(marker.title.clone());
+        self.normalized_title = normalize_title(&marker.title);
+        self.parts[0] = Some(1);
+    }
+
+    fn add_post(&mut self, message: &ParsedMessage, text: String, marker: Option<&Marker>) -> Post {
+        let (part_no, body) = match marker {
+            Some(marker) => {
+                let ordinal = self.next_ordinal(marker);
+                self.last_number = Some(marker.number);
+                self.last_at = message.published_at;
+                self.declared_parts = self.declared_parts.max(marker.total);
+                (Some(ordinal), marker.body.clone())
+            }
+            None => (None, text.clone()),
+        };
+        self.parts.push(part_no);
+        self.bodies.push(body);
+        Post {
+            message_id: message.id,
+            article_id: self.id,
+            part_no,
+            text,
+            published_at: message.published_at,
+            forwarded_from: message.forwarded_from.clone(),
+        }
+    }
+
+    fn next_ordinal(&self, marker: &Marker) -> u32 {
+        if self.parts.is_empty() {
+            marker.number
+        } else {
+            self.last_ordinal() + 1
+        }
+    }
+
     fn accepts(&self, marker: &Marker, at: DateTime<Utc>) -> bool {
         let age = at.signed_duration_since(self.last_at);
-        ((marker.number > 1
+        let continues_numbering = marker.number > 1
             && self.last_number == Some(marker.number - 1)
-            && (Duration::zero()..=Duration::hours(24)).contains(&age))
-            || (self.last_number == Some(marker.number)
-                && (Duration::zero()..=Duration::hours(3)).contains(&age)))
-            && similarity::ratio(&self.normalized_title, &normalize_title(&marker.title)) >= 0.54
+            && (Duration::zero()..=Duration::hours(24)).contains(&age);
+        let repeats_number = self.last_number == Some(marker.number)
+            && (Duration::zero()..=Duration::hours(3)).contains(&age);
+        if !continues_numbering && !repeats_number {
+            return false;
+        }
+        similarity::ratio(&self.normalized_title, &normalize_title(&marker.title)) >= 0.54
     }
 
     fn last_ordinal(&self) -> u32 {
