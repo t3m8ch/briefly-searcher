@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE normalizer_state SET normalized_up_to = $1, last_recalculation_started_at = $2, last_recalculation_duration_ms = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f7bf520b7457fe86ef3ddb4d65a88b20604dd2e6b5ad48b14d96c2f179575975"
+}

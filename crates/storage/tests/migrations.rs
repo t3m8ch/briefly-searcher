@@ -72,6 +72,12 @@ async fn migrate_creates_loader_schema_on_empty_database(pool: PgPool) {
     .unwrap();
     let columns: Vec<_> = columns
         .iter()
+        .filter(|c| {
+            !matches!(
+                c.table_name.as_str(),
+                "articles" | "posts" | "normalizer_state"
+            )
+        })
         .map(|c| {
             (
                 c.table_name.as_str(),
@@ -102,6 +108,12 @@ async fn migrate_creates_loader_schema_on_empty_database(pool: PgPool) {
     .unwrap();
     let primary_keys: Vec<_> = primary_keys
         .iter()
+        .filter(|k| {
+            !matches!(
+                k.table_name.as_str(),
+                "articles" | "posts" | "normalizer_state"
+            )
+        })
         .map(|k| (k.table_name.as_str(), k.column_name.as_str()))
         .collect();
     assert_eq!(
@@ -175,4 +187,73 @@ async fn raw_posts_keeps_first_payload_for_message_id(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(payload, serde_json::json!({ "message": "первый" }));
+}
+
+#[sqlx::test(migrations = false)]
+async fn migrate_upgrades_loader_database(pool: PgPool) {
+    sqlx::raw_sql(include_str!(
+        "../migrations/20260927000000_loader_schema.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Симулируем БД части 1, созданную прежней командой migrate.
+    sqlx::raw_sql("CREATE TABLE _sqlx_migrations (version BIGINT PRIMARY KEY, description TEXT NOT NULL, installed_on TIMESTAMPTZ NOT NULL DEFAULT now(), success BOOLEAN NOT NULL, checksum BYTEA NOT NULL, execution_time BIGINT NOT NULL)")
+        .execute(&pool).await.unwrap();
+    let loader = MIGRATION_VERSION;
+    let migration = briefly_searcher_storage::MIGRATOR
+        .iter()
+        .find(|m| m.version == loader)
+        .unwrap();
+    sqlx::query("INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES ($1, $2, TRUE, $3, 0)")
+        .bind(loader).bind(&*migration.description).bind(&*migration.checksum)
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO raw_posts VALUES (42, '{}', 'test', now())")
+        .execute(&pool)
+        .await
+        .unwrap();
+    Storage::from_pool(pool.clone()).migrate().await.unwrap();
+    let boundary: Option<i64> = sqlx::query_scalar("SELECT normalized_up_to FROM normalizer_state")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(boundary, None);
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM raw_posts")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+const MIGRATION_VERSION: i64 = 20260927000000;
+
+#[sqlx::test]
+async fn normalizer_schema_enforces_identity_status_and_singleton(pool: PgPool) {
+    let storage = Storage::from_pool(pool.clone());
+    let state = storage.normalizer_state().await.unwrap();
+    assert_eq!(state.normalized_up_to, None);
+    assert_eq!(state.last_recalculation_started_at, None);
+    assert_eq!(state.last_recalculation_duration_ms, None);
+    assert_eq!(state.last_error, None);
+    assert!(
+        sqlx::query("INSERT INTO normalizer_state DEFAULT VALUES")
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("INSERT INTO normalizer_state (singleton) VALUES (FALSE)")
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    assert!(sqlx::query("INSERT INTO articles (id, search_text, status, published_at) VALUES (42, 'x', 'single', now())").execute(&pool).await.is_err());
+    sqlx::query(
+        "INSERT INTO raw_posts (message_id, payload, payload_schema) VALUES (42, '{}', 'test')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(sqlx::query("INSERT INTO articles (id, search_text, status, published_at) VALUES (42, 'x', 'typo', now())").execute(&pool).await.is_err());
+    assert!(sqlx::query("INSERT INTO posts (message_id, article_id, text, published_at) VALUES (42, 42, 'x', now())").execute(&pool).await.is_err());
 }

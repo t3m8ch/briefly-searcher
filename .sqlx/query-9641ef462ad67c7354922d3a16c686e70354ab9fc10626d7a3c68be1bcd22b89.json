@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE normalizer_state SET last_error = $1, last_error_at = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9641ef462ad67c7354922d3a16c686e70354ab9fc10626d7a3c68be1bcd22b89"
+}

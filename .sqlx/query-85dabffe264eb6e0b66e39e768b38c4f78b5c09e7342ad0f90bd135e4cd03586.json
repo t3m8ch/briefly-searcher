@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT message_id AS id, payload, payload_schema FROM raw_posts WHERE message_id <= $1 ORDER BY message_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "raw_posts",
+            "name": "message_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "raw_posts",
+            "name": "payload"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "payload_schema",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "raw_posts",
+            "name": "payload_schema"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "85dabffe264eb6e0b66e39e768b38c4f78b5c09e7342ad0f90bd135e4cd03586"
+}
