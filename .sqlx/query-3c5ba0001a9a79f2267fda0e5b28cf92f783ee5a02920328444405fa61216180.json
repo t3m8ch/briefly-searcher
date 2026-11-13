@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT normalized_up_to, last_recalculation_started_at, last_recalculation_duration_ms, last_heartbeat_at, last_error, last_error_at FROM normalizer_state",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "normalized_up_to",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "normalizer_state",
+            "name": "normalized_up_to"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "last_recalculation_started_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "normalizer_state",
+            "name": "last_recalculation_started_at"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "last_recalculation_duration_ms",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "normalizer_state",
+            "name": "last_recalculation_duration_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "last_heartbeat_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "normalizer_state",
+            "name": "last_heartbeat_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "last_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalizer_state",
+            "name": "last_error"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "last_error_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "normalizer_state",
+            "name": "last_error_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "3c5ba0001a9a79f2267fda0e5b28cf92f783ee5a02920328444405fa61216180"
+}

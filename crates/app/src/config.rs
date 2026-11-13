@@ -143,3 +143,12 @@ mod tests {
         );
     }
 }
+
+/// Настройки независимого процесса нормализации.
+#[derive(Debug, Envconfig)]
+pub struct NormalizerConfig {
+    #[envconfig(nested)]
+    pub database: DatabaseConfig,
+    #[envconfig(from = "NORMALIZER_POLL_INTERVAL_SECS", default = "30")]
+    pub poll_interval_secs: u32,
+}

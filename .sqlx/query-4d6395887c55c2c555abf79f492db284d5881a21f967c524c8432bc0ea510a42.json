@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO articles (id, title, search_text, status, declared_parts, published_at) SELECT * FROM UNNEST($1::bigint[], $2::text[], $3::text[], $4::text[], $5::int[], $6::timestamptz[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8Array",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "Int4Array",
+        "TimestamptzArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4d6395887c55c2c555abf79f492db284d5881a21f967c524c8432bc0ea510a42"
+}

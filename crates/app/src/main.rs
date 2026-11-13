@@ -5,7 +5,10 @@ mod config;
 use anyhow::Context;
 use briefly_searcher::clock::SystemClock;
 use briefly_searcher::loader::{self, Loader};
-use briefly_searcher::web;
+use briefly_searcher::{
+    normalizer::{self, Normalizer},
+    web,
+};
 use briefly_searcher_storage::Storage;
 use briefly_searcher_telegram::{WebFeed, WebFeedSettings};
 use chrono::TimeDelta;
@@ -13,7 +16,7 @@ use clap::{Parser, Subcommand};
 use envconfig::Envconfig;
 use tracing_subscriber::EnvFilter;
 
-use crate::config::{DatabaseConfig, LoaderConfig, WebConfig};
+use crate::config::{DatabaseConfig, LoaderConfig, NormalizerConfig, WebConfig};
 
 /// Адрес Telegram, у которого загрузчик читает веб-ленту `/s/<канал>`.
 const TELEGRAM_BASE_URL: &str = "https://t.me";
@@ -36,6 +39,8 @@ struct Cli {
 enum Command {
     /// Применить миграции схемы к БД из DATABASE_URL и завершиться.
     Migrate,
+    /// Пересчитывать посты и статьи по завершённой границе загрузки.
+    Normalizer,
     /// Загружать веб-ленту канала TELEGRAM_CHANNEL в БД, повторяя проходы
     /// с интервалом опроса.
     Loader,
@@ -55,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
 
     match Cli::parse().command {
         Command::Migrate => migrate().await,
+        Command::Normalizer => run_normalizer().await,
         Command::Loader => run_loader().await,
         Command::Web => serve_web().await,
     }
@@ -171,4 +177,23 @@ fn load_dotenv() -> anyhow::Result<()> {
         Err(error) if error.not_found() => Ok(()),
         Err(error) => Err(error).context("не удалось прочитать .env"),
     }
+}
+
+async fn run_normalizer() -> anyhow::Result<()> {
+    let config = NormalizerConfig::init_from_env()
+        .context("не удалось прочитать конфигурацию из окружения")?;
+    anyhow::ensure!(
+        config.poll_interval_secs > 0,
+        "NORMALIZER_POLL_INTERVAL_SECS должен быть больше нуля"
+    );
+    let storage = Storage::connect(&config.database.database_url).await?;
+    let lock = normalizer::lock(&storage).await?;
+    Normalizer::new(
+        storage,
+        SystemClock,
+        TimeDelta::seconds(config.poll_interval_secs.into()),
+    )
+    .run(lock, shutdown_signal())
+    .await
+    .context("команда normalizer")
 }

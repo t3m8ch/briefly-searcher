@@ -304,6 +304,7 @@ dependencies = [
  "anyhow",
  "askama",
  "axum",
+ "briefly-searcher-normalizer",
  "briefly-searcher-storage",
  "briefly-searcher-telegram",
  "chrono",
@@ -334,6 +335,8 @@ dependencies = [
 name = "briefly-searcher-storage"
 version = "0.1.0"
 dependencies = [
+ "briefly-searcher-normalizer",
+ "briefly-searcher-telegram",
  "chrono",
  "serde_json",
  "sqlx",

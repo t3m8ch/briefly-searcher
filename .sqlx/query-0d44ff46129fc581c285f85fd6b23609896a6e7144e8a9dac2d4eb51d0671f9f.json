@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE normalizer_state SET last_heartbeat_at = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0d44ff46129fc581c285f85fd6b23609896a6e7144e8a9dac2d4eb51d0671f9f"
+}

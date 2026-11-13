@@ -5,6 +5,7 @@ Briefly Searcher — поиск по каналу @brieflyru. План — [docs
 ## Crates
 
 - `crates/telegram` — доступ к Telegram: источник истории на веб-ленте `t.me/s` (записанные страницы для тестов — в `tests/fixtures/`);
+- `crates/normalizer` — чистые правила постов и склейки составных статей;
 - `crates/storage` — PostgreSQL: схема, миграции и все SQL-запросы;
 - `crates/app` — бинарник `briefly-searcher` с командами и веб-админкой (`src/web`, шаблон `templates/admin.html`, вшитый htmx 2.0.11 в `assets/`).
 
@@ -34,6 +35,7 @@ just clippy                  # проверить код Clippy
 just fmt                     # проверить форматирование
 target/debug/briefly-searcher migrate  # применить миграции к БД из DATABASE_URL
 target/debug/briefly-searcher loader   # загружать веб-ленту в raw_posts
+target/debug/briefly-searcher normalizer # пересчитывать посты и статьи
 target/debug/briefly-searcher web      # админка на http://127.0.0.1:3000
 ```
 
@@ -58,3 +60,23 @@ target/debug/briefly-searcher web      # админка на http://127.0.0.1:30
 ```sh
 just sqlx-prepare
 ```
+
+## Нормализатор
+
+`normalizer` работает отдельным процессом и читает только блоки до
+`ingestion_state.newest_fetched_id`. При старте он пересчитывает результат,
+затем проверяет рост границы каждые `NORMALIZER_POLL_INTERVAL_SECS` секунд
+(по умолчанию 30; значение должно быть положительным). Пока граница равна
+`NULL`, результат пустой.
+
+После разбора и склейки процесс заменяет `articles`, `posts` и границу
+`normalizer_state.normalized_up_to` одной транзакцией. Массовая вставка —
+два запроса `INSERT … SELECT FROM UNNEST`, по одному на таблицу.
+`TRUNCATE` блокирует чтение этих таблиц до конца транзакции.
+
+Второй экземпляр завершается с понятной ошибкой; блокировка независима от
+блокировки загрузчика. При ошибке разбора или сохранения прежний результат
+остаётся, ошибка и её время записываются в `normalizer_state`; следующая
+попытка — на следующем опросе. Там же хранятся heartbeat, начало и длительность
+последнего успешного пересчёта в миллисекундах. По SIGTERM/SIGINT процесс
+завершает работу, незавершённая транзакция откатывается.

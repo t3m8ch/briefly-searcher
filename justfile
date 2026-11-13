@@ -13,8 +13,8 @@ check:
     SQLX_OFFLINE=true heavy -- cargo check --workspace --all-targets
 
 # Запустить тесты (нужна PostgreSQL из DATABASE_URL)
-test:
-    SQLX_OFFLINE=true heavy -- cargo test --workspace
+test *args:
+    SQLX_OFFLINE=true heavy -- cargo test --workspace {{args}}
 
 # Проверить код Clippy
 clippy:

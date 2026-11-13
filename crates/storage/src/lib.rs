@@ -3,6 +3,9 @@
 //! Здесь живут схема, миграции (`migrations/`) и все SQL-запросы. Остальные
 //! crates вызывают функции этого crate и сами SQL не пишут.
 
+mod normalization;
+pub use normalization::{NormalizerLock, NormalizerState};
+
 use chrono::{DateTime, Utc};
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::{Connection, PgConnection, PgPool, Postgres, Transaction};
@@ -20,6 +23,8 @@ pub enum Error {
     Migrate(#[from] MigrateError),
     #[error("ошибка запроса к PostgreSQL: {0}")]
     Query(#[from] sqlx::Error),
+    #[error("номер части не помещается в INT: {0}")]
+    PartNumber(#[from] std::num::TryFromIntError),
 }
 
 /// Состояние прохода, выведенное из `ingestion_state` и `raw_posts`.

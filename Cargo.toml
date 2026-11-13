@@ -7,6 +7,7 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
+briefly-searcher-normalizer = { path = "crates/normalizer" }
 briefly-searcher-storage = { path = "crates/storage" }
 briefly-searcher-telegram = { path = "crates/telegram" }
 
