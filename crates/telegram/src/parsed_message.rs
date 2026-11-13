@@ -105,8 +105,10 @@ fn parse_web_block(message: &Message) -> Result<ParsedMessage, ParseError> {
     };
     let mut album_ids = Vec::new();
     if kind == MessageKind::Album {
-        for link in root.select(&selector(".grouped_media_wrap[href]")) {
-            let href = link.attr("href").unwrap();
+        for link in root.select(&selector(".grouped_media_wrap")) {
+            let href = link
+                .attr("href")
+                .ok_or_else(|| invalid("нет ссылки элемента альбома"))?;
             let target = href
                 .strip_suffix("?single")
                 .ok_or_else(|| invalid("неверная ссылка элемента альбома"))?;

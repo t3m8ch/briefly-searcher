@@ -148,3 +148,25 @@ fn invalid_payload_and_unexpected_markup_are_errors() {
     }
     assert!(parse_message(&block(563, html)).is_err());
 }
+
+#[test]
+fn album_without_item_links_is_an_error_instead_of_partial_success() {
+    assert!(
+        parse_message(&block(
+            35361,
+            include_str!("fixtures/blocks/empty-album-35361.html")
+        ))
+        .is_err()
+    );
+    let html = include_str!("fixtures/blocks/album-562.html")
+        .replace("href=\"https://t.me/brieflyru/563?single\"", "");
+    assert!(parse_message(&block(562, &html)).is_err());
+}
+
+#[test]
+fn recognized_photo_without_caption_has_empty_text() {
+    let html = "<div class=\"tgme_widget_message\" data-post=\"brieflyru/9\"><a class=\"tgme_widget_message_photo_wrap\"></a><a class=\"tgme_widget_message_date\"><time datetime=\"2026-10-03T07:00:04Z\"></time></a></div>";
+    let parsed = parse_message(&block(9, html)).unwrap();
+    assert_eq!(parsed.kind, MessageKind::Photo);
+    assert!(parsed.text.is_empty());
+}
