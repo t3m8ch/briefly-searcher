@@ -10,7 +10,16 @@ Briefly Searcher — поиск по каналу @brieflyru. План — [docs
 
 ## Разработка
 
-Конфигурация — только переменные окружения; локально их удобно держать в `.env`: бинарник подхватывает его при запуске, уже заданные переменные окружения важнее файла. `.env` в Git не попадает.
+Команды разработки описаны в `justfile`. Установите [just](https://just.systems/man/en/installation.html) и [heavy](https://github.com/mokevnin/heavy) (нужны и на CI, если он запускает эти команды):
+
+```sh
+cargo install just --locked
+cargo install heavy --version 0.1.2 --locked
+```
+
+`just` показывает список команд. Сборка, проверка компиляции, тесты, Clippy и обновление SQL-кэша запускаются через `heavy`: все worktree и агенты на машине делят общий пул слотов. Число слотов задаётся через `HEAVY_SLOTS`; используйте одно значение во всех проектах, работающих с общим пулом. `heavy --status` показывает занятые слоты. Проверка форматирования идёт без очереди.
+
+Конфигурация — только переменные окружения; локально их удобно держать в `.env`: бинарник и `just` подхватывают его при запуске, уже заданные переменные окружения важнее файла. `.env` в Git не попадает.
 
 ```sh
 DATABASE_URL=postgres://postgres:postgres@localhost/briefly_searcher
@@ -18,13 +27,17 @@ TELEGRAM_CHANNEL=brieflyru
 ```
 
 ```sh
-cargo run -- migrate          # применить миграции к БД из DATABASE_URL
-cargo run -- loader           # загружать веб-ленту t.me/s/$TELEGRAM_CHANNEL в raw_posts
-cargo run -- web              # веб-админка только для чтения на http://127.0.0.1:3000
-cargo test --workspace        # тесты #[sqlx::test] создают временные БД через DATABASE_URL
+just build                   # собрать приложение через heavy
+just check                   # проверить компиляцию всех targets
+just test                    # тесты #[sqlx::test] создают временные БД через DATABASE_URL
+just clippy                  # проверить код Clippy
+just fmt                     # проверить форматирование
+target/debug/briefly-searcher migrate  # применить миграции к БД из DATABASE_URL
+target/debug/briefly-searcher loader   # загружать веб-ленту в raw_posts
+target/debug/briefly-searcher web      # админка на http://127.0.0.1:3000
 ```
 
-`loader` и `web` — отдельные долгоживущие процессы: загрузчик сохраняет блоки веб-ленты, админка показывает, как идёт загрузка. Переменные окружения `loader`:
+`loader` и `web` — отдельные долгоживущие процессы: загрузчик сохраняет блоки веб-ленты, админка показывает, как идёт загрузка. Они запускаются вне `heavy`, чтобы не занимать слот на всё время работы. Переменные окружения `loader`:
 
 | Переменная | По умолчанию | Что задаёт |
 | --- | --- | --- |
@@ -40,8 +53,8 @@ cargo test --workspace        # тесты #[sqlx::test] создают врем
 
 Логи пишутся в stdout; уровень задаёт `RUST_LOG` (по умолчанию `info`).
 
-Проект собирается без живой БД по кэшу запросов из `.sqlx/`. После изменения SQL-запросов обновите кэш ([`sqlx-cli`](https://crates.io/crates/sqlx-cli)):
+Рецепты сборки, проверки компиляции, тестов и Clippy задают `SQLX_OFFLINE=true`: SQL-запросы проверяются по кэшу `.sqlx/` без подключения к БД. Для выполнения интеграционных тестов PostgreSQL всё равно нужна. После изменения SQL-запросов обновите кэш ([`sqlx-cli`](https://crates.io/crates/sqlx-cli), нужна живая БД):
 
 ```sh
-cargo sqlx prepare --workspace -- --all-targets
+just sqlx-prepare
 ```
