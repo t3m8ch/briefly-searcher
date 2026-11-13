@@ -6,7 +6,10 @@
 
 use std::future::Future;
 
+mod parsed_message;
 mod web_feed;
+
+pub use parsed_message::{MessageKind, ParseError, ParsedMessage, parse_message};
 
 pub use web_feed::{WebFeed, WebFeedSettings};
 
