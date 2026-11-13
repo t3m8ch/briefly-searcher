@@ -203,3 +203,48 @@ async fn process_retries_startup_error_on_next_poll_and_stops_while_waiting(pool
     process.await.unwrap().unwrap();
     lock(&storage).await.unwrap().release().await.unwrap();
 }
+
+#[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
+async fn shutdown_interrupts_heartbeat_waiting_for_database_lock(pool: PgPool) {
+    use briefly_searcher::normalizer::lock;
+    let clock = ControlledClock {
+        now: std::sync::Arc::new(std::sync::Mutex::new(chrono::Utc::now())),
+        waiting: Default::default(),
+        advance: Default::default(),
+    };
+    let storage = Storage::from_pool(pool.clone());
+    let guard = lock(&storage).await.unwrap();
+    let normalizer = Normalizer::new(storage.clone(), clock.clone(), TimeDelta::seconds(30));
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let process = tokio::spawn(async move {
+        normalizer
+            .run(guard, async {
+                stopped.await.unwrap();
+            })
+            .await
+    });
+    clock.waiting.notified().await;
+    let mut blocker = pool.begin().await.unwrap();
+    sqlx::query("LOCK normalizer_state IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+    clock.advance.notify_one();
+    // Ждём, пока основной цикл действительно заблокируется на heartbeat.
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar("SELECT EXISTS(SELECT FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE 'UPDATE normalizer_state SET last_heartbeat_at%')")
+                .fetch_one(&pool).await.unwrap();
+            if waiting { break; }
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    stop.send(()).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), process)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    blocker.rollback().await.unwrap();
+    lock(&storage).await.unwrap().release().await.unwrap();
+}
