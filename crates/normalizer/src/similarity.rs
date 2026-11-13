@@ -16,26 +16,20 @@ pub(super) fn ratio(first: &str, second: &str) -> f64 {
     2.0 * matched_characters as f64 / total_length as f64
 }
 
-struct TextPair<'a> {
-    first: &'a [char],
-    second: &'a [char],
-}
+struct TextPair<'a>(&'a [char], &'a [char]);
 
 impl<'a> TextPair<'a> {
     fn unmatched_sides(&self, block: &MatchingBlock) -> [Self; 2] {
-        let before = Self {
-            first: &self.first[..block.first_start],
-            second: &self.second[..block.second_start],
-        };
-        let after = Self {
-            first: &self.first[block.first_start + block.length..],
-            second: &self.second[block.second_start + block.length..],
-        };
+        let before = Self(&self.0[..block.first_start], &self.1[..block.second_start]);
+        let after = Self(
+            &self.0[block.first_start + block.length..],
+            &self.1[block.second_start + block.length..],
+        );
         [before, after]
     }
 
     fn has_both_texts(&self) -> bool {
-        !self.first.is_empty() && !self.second.is_empty()
+        !self.0.is_empty() && !self.1.is_empty()
     }
 }
 
@@ -47,10 +41,10 @@ struct MatchingBlock {
 }
 
 fn count_matching_characters(first: &[char], second: &[char]) -> usize {
-    let mut pending = vec![TextPair { first, second }];
+    let mut pending = vec![TextPair(first, second)];
     let mut matched_characters = 0;
     while let Some(pair) = pending.pop() {
-        let Some(block) = longest_common_block(pair.first, pair.second) else {
+        let Some(block) = longest_common_block(pair.0, pair.1) else {
             continue;
         };
         matched_characters += block.length;
