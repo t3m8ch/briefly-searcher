@@ -1,41 +1,91 @@
-//! Ratcliff/Obershelp: рекурсивно совпадающие непрерывные подстроки.
-//! При равной длине выбирается самая ранняя позиция в первом, затем во втором
+//! Ratcliff/Obershelp: находим самый длинный общий непрерывный фрагмент,
+//! затем повторяем поиск слева и справа от него. Доля совпадения равна
+//! удвоенному числу совпавших символов, делённому на суммарную длину строк.
+//!
+//! При равной длине выбираем самый ранний фрагмент в первом, затем во втором
 //! заголовке, как в SequenceMatcher (без эвристики popular characters).
 
-pub(super) fn ratio(a: &str, b: &str) -> f64 {
-    let a: Vec<_> = a.chars().collect();
-    let b: Vec<_> = b.chars().collect();
-    if a.is_empty() && b.is_empty() {
+pub(super) fn ratio(first: &str, second: &str) -> f64 {
+    let first: Vec<_> = first.chars().collect();
+    let second: Vec<_> = second.chars().collect();
+    let total_length = first.len() + second.len();
+    if total_length == 0 {
         return 1.0;
     }
-    let mut ranges = vec![(0, a.len(), 0, b.len())];
-    let mut matched = 0;
-    while let Some((a_start, a_end, b_start, b_end)) = ranges.pop() {
-        let mut previous = vec![0; b_end - b_start + 1];
-        let (mut best_a, mut best_b, mut length) = (a_start, b_start, 0);
-        for (i, ac) in a.iter().enumerate().take(a_end).skip(a_start) {
-            let mut current = vec![0; previous.len()];
-            for (j, bc) in b.iter().enumerate().take(b_end).skip(b_start) {
-                if ac == bc {
-                    let size = previous[j - b_start] + 1;
-                    current[j - b_start + 1] = size;
-                    if size > length {
-                        (best_a, best_b, length) = (i + 1 - size, j + 1 - size, size);
-                    }
-                }
-            }
-            previous = current;
-        }
-        if length == 0 {
-            continue;
-        }
-        matched += length;
-        if best_a > a_start && best_b > b_start {
-            ranges.push((a_start, best_a, b_start, best_b));
-        }
-        if best_a + length < a_end && best_b + length < b_end {
-            ranges.push((best_a + length, a_end, best_b + length, b_end));
-        }
+    let matched_characters = count_matching_characters(&first, &second);
+    2.0 * matched_characters as f64 / total_length as f64
+}
+
+struct TextPair<'a> {
+    first: &'a [char],
+    second: &'a [char],
+}
+
+impl<'a> TextPair<'a> {
+    fn unmatched_sides(&self, block: &MatchingBlock) -> [Self; 2] {
+        let before = Self {
+            first: &self.first[..block.first_start],
+            second: &self.second[..block.second_start],
+        };
+        let after = Self {
+            first: &self.first[block.first_start + block.length..],
+            second: &self.second[block.second_start + block.length..],
+        };
+        [before, after]
     }
-    2.0 * matched as f64 / (a.len() + b.len()) as f64
+
+    fn has_both_texts(&self) -> bool {
+        !self.first.is_empty() && !self.second.is_empty()
+    }
+}
+
+#[derive(Default)]
+struct MatchingBlock {
+    first_start: usize,
+    second_start: usize,
+    length: usize,
+}
+
+fn count_matching_characters(first: &[char], second: &[char]) -> usize {
+    let mut pending = vec![TextPair { first, second }];
+    let mut matched_characters = 0;
+    while let Some(pair) = pending.pop() {
+        let Some(block) = longest_common_block(pair.first, pair.second) else {
+            continue;
+        };
+        matched_characters += block.length;
+        pending.extend(
+            pair.unmatched_sides(&block)
+                .into_iter()
+                .filter(TextPair::has_both_texts),
+        );
+    }
+    matched_characters
+}
+
+fn longest_common_block(first: &[char], second: &[char]) -> Option<MatchingBlock> {
+    let mut longest = MatchingBlock::default();
+    let mut previous_lengths = vec![0; second.len() + 1];
+    for (first_index, first_char) in first.iter().enumerate() {
+        let mut current_lengths = vec![0; second.len() + 1];
+        for (second_index, second_char) in second.iter().enumerate() {
+            if first_char != second_char {
+                continue;
+            }
+            // Длина общего фрагмента, заканчивающегося на этих двух символах:
+            // совпадение на предыдущих позициях продолжается ещё на один символ.
+            let length = previous_lengths[second_index] + 1;
+            current_lengths[second_index + 1] = length;
+            // Строгое сравнение сохраняет самый ранний фрагмент при равенстве.
+            if length > longest.length {
+                longest = MatchingBlock {
+                    first_start: first_index + 1 - length,
+                    second_start: second_index + 1 - length,
+                    length,
+                };
+            }
+        }
+        previous_lengths = current_lengths;
+    }
+    (longest.length > 0).then_some(longest)
 }
