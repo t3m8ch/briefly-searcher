@@ -1,0 +1,12 @@
+[package]
+name = "briefly-searcher-normalizer"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+briefly-searcher-telegram.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

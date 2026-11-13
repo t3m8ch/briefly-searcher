@@ -322,6 +322,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "briefly-searcher-normalizer"
+version = "0.1.0"
+dependencies = [
+ "briefly-searcher-telegram",
+ "chrono",
+ "serde_json",
+]
+
+[[package]]
 name = "briefly-searcher-storage"
 version = "0.1.0"
 dependencies = [
