@@ -130,12 +130,14 @@ impl<C: Clock> Normalizer<C> {
                     () = &mut shutdown => break true,
                     () = self.clock.sleep_until(deadline.min(now + TimeDelta::seconds(15))) => {}
                 }
-                if let Err(error) = self
-                    .storage
-                    .record_normalizer_heartbeat(self.clock.now())
-                    .await
-                {
-                    tracing::warn!(%error, "не удалось записать heartbeat нормализатора");
+                tokio::select! {
+                    biased;
+                    () = &mut shutdown => break true,
+                    result = self.storage.record_normalizer_heartbeat(self.clock.now()) => {
+                        if let Err(error) = result {
+                            tracing::warn!(%error, "не удалось записать heartbeat нормализатора");
+                        }
+                    }
                 }
             };
             if stopped {
