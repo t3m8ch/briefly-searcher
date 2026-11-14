@@ -150,6 +150,17 @@ fn invalid_payload_and_unexpected_markup_are_errors() {
 }
 
 #[test]
+fn forwarded_post_without_source_name_still_parses() {
+    let parsed = parse_message(&block(
+        48684,
+        include_str!("fixtures/blocks/forward-48684.html"),
+    ))
+    .unwrap();
+    assert_eq!(parsed.kind, MessageKind::Video);
+    assert_eq!(parsed.forwarded_from, None);
+}
+
+#[test]
 fn unsupported_media_placeholder_is_not_publication_text() {
     let parsed = parse_message(&block(
         48041,
