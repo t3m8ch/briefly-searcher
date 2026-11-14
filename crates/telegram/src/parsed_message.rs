@@ -226,10 +226,8 @@ fn forwarding_source(root: ElementRef<'_>) -> Result<Option<String>, &'static st
     let mut text = String::new();
     visible_text(name, &mut text);
     let name = text.trim();
-    if name.is_empty() {
-        return Err("пустой источник пересылки");
-    }
-    Ok(Some(name.to_owned()))
+    // Имя может быть пустым в самой веб-ленте; восстановить его нельзя.
+    Ok((!name.is_empty()).then(|| name.to_owned()))
 }
 
 fn selector(css: &str) -> Selector {
