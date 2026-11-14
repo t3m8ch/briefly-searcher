@@ -5,7 +5,7 @@ use std::{future::Future, pin::pin, time::Instant};
 use briefly_searcher_normalizer::normalize;
 use briefly_searcher_storage::{NormalizerLock, Storage};
 use briefly_searcher_telegram::parse_message;
-use chrono::TimeDelta;
+use chrono::{DateTime, TimeDelta, Utc};
 
 use crate::clock::Clock;
 
@@ -64,32 +64,35 @@ impl<C: Clock> Normalizer<C> {
                 }
             }
             let deadline = self.clock.now() + self.poll_interval;
-            let stopped = loop {
-                let now = self.clock.now();
-                if now >= deadline {
-                    break false;
-                }
-                tokio::select! {
-                    biased;
-                    () = &mut shutdown => break true,
-                    () = self.clock.sleep_until(deadline.min(now + TimeDelta::seconds(15))) => {}
-                }
-                tokio::select! {
-                    biased;
-                    () = &mut shutdown => break true,
-                    result = self.storage.record_normalizer_heartbeat(self.clock.now()) => {
-                        if let Err(error) = result {
-                            tracing::warn!(%error, "не удалось записать heartbeat нормализатора");
-                        }
-                    }
-                }
-            };
-            if stopped {
-                break;
+            tokio::select! {
+                biased;
+                () = &mut shutdown => break,
+                () = self.wait_until(deadline) => {}
             }
         }
         lock.release().await?;
         Ok(())
+    }
+
+    /// Ждёт следующего опроса, обновляя heartbeat не реже чем раз в 15 секунд.
+    /// Вызов отменяется веткой shutdown в run, включая запрос записи heartbeat.
+    async fn wait_until(&self, deadline: DateTime<Utc>) {
+        loop {
+            let now = self.clock.now();
+            if now >= deadline {
+                return;
+            }
+            self.clock
+                .sleep_until(deadline.min(now + TimeDelta::seconds(15)))
+                .await;
+            if let Err(error) = self
+                .storage
+                .record_normalizer_heartbeat(self.clock.now())
+                .await
+            {
+                tracing::warn!(%error, "не удалось записать heartbeat нормализатора");
+            }
+        }
     }
 
     /// Один опрос; `force` применяет правила независимо от сохранённой границы.
