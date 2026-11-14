@@ -93,6 +93,34 @@
 <div class="j-row"><span class="j-when"></span><span class="j-rel"></span><span class="j-mark"></span><span class="j-what t-dim">событий ещё не было</span></div>
 {%- endfor %}
 </div>
+<section aria-label="Нормализатор">
+<h2 class="t-status">Нормализатор</h2>
+{% if !s.normalizer.ready %}<p class="t-dim">Результата ещё нет: первый пересчёт не завершён.</p>{% endif %}
+<div class="head">
+  <span class="t-label">Heartbeat нормализатора:</span>
+  {% if let Some(at) = s.normalizer.heartbeat %}<span>{% call moment(at) %}{% endcall %} · {{ at.relative }}</span>{% else %}<span class="t-dim">ещё не запускался</span>{% endif %}
+</div>
+{% if s.normalizer.ready %}
+<div class="head">
+  <span class="t-label">normalized_up_to:</span>{% if let Some(id) = s.normalizer.boundary %}<span>{{ id }}</span>{% else %}<span class="t-dim">NULL · ждёт завершения первого прохода загрузчика</span>{% endif %}
+  <span class="t-label">Отставание по ID:</span>{% if let Some(lag) = s.normalizer.lag %}<span>{{ lag }}</span>{% else %}<span class="t-dim">граница загрузки ещё не задана</span>{% endif %}
+  <span class="t-label">Последний пересчёт:</span>{% if let Some(at) = s.normalizer.recalculation %}<span>{% call moment(at) %}{% endcall %} · {{ at.relative }}</span>{% else %}<span>—</span>{% endif %}
+  <span class="t-label">Длительность:</span>{% if let Some(duration) = s.normalizer.duration %}<span>{{ duration }}</span>{% else %}<span>—</span>{% endif %}
+  <span class="t-label">Посты:</span><span>{{ s.normalizer.posts }}</span>
+  <span class="t-label">Статьи:</span><span>single: {{ s.normalizer.single }} · complete: {{ s.normalizer.complete }} · incomplete: {{ s.normalizer.incomplete }}</span>
+  <span class="t-label">Не стали постами:</span><span>{{ s.normalizer.excluded }} <span class="t-dim">блоков до normalized_up_to</span></span>
+</div>
+{% endif %}
+{% if let Some(error) = s.normalizer.error %}
+<p class="t-bad">Последняя ошибка нормализатора{% if let Some(at) = s.normalizer.error_at %} · {% call moment(at) %}{% endcall %}{% endif %}: {{ error }}</p>
+{% endif %}
+<h3>Последние неполные статьи</h3>
+<ul>
+{% for article in s.normalizer.articles %}
+<li>{{ article.title }}: {% for part in article.parts %}<a href="{{ part.url }}">{{ part.id }}</a>{% if !loop.last %}, {% endif %}{% endfor %}</li>
+{% else %}<li class="t-dim">Неполных статей нет.</li>{% endfor %}
+</ul>
+</section>
 {% endblock -%}
 </main>
 <script src="/htmx.min.js"></script>

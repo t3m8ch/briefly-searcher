@@ -25,7 +25,7 @@ async fn request(pool: &PgPool, request: axum::http::request::Builder) -> (Statu
 }
 
 async fn send(pool: &PgPool, request: axum::http::request::Builder) -> Response {
-    web::router(Storage::from_pool(pool.clone()))
+    web::router(Storage::from_pool(pool.clone()), "brieflyru".into())
         .oneshot(request.body(Body::empty()).unwrap())
         .await
         .unwrap()
@@ -355,6 +355,88 @@ async fn admin_has_no_mutating_routes(pool: PgPool) {
             .await;
             assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED, "{method} {uri}");
         }
+    }
+}
+
+#[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
+async fn normalizer_before_first_recalculation_has_no_result(pool: PgPool) {
+    for uri in ["/", "/status"] {
+        let (status, body) = get(&pool, uri).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("Нормализатор"), "{body}");
+        assert!(body.contains("Результата ещё нет"), "{body}");
+        assert!(body.contains("Heartbeat нормализатора"), "{body}");
+    }
+}
+
+#[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
+async fn normalizer_shows_published_counts_and_recalculation(pool: PgPool) {
+    insert_messages(&pool, &[1, 2, 3, 4, 5, 8, 10]).await;
+    sqlx::query("UPDATE ingestion_state SET newest_fetched_id = 8")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO articles (id, title, search_text, status, published_at) VALUES (1, 'Один', 'Один', 'single', now()), (2, 'Полная', 'Полная', 'complete', now()), (4, 'Неполная', 'Неполная', 'incomplete', now())").execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO posts (message_id, article_id, part_no, text, published_at) VALUES (1, 1, NULL, 'Один', now()), (2, 2, 1, 'Первая', now()), (3, 2, 2, 'Вторая', now()), (4, 4, 1, 'Первая', now())").execute(&pool).await.unwrap();
+    sqlx::query("UPDATE normalizer_state SET normalized_up_to = 5, last_heartbeat_at = '2026-11-14 01:02:03Z', last_recalculation_started_at = '2026-11-14 01:00:00Z', last_recalculation_duration_ms = 2500").execute(&pool).await.unwrap();
+    for uri in ["/", "/status"] {
+        let (status, body) = get(&pool, uri).await;
+        assert_eq!(status, StatusCode::OK);
+        for text in [
+            "normalized_up_to:</span><span>5",
+            "Отставание по ID:</span><span>3",
+            "Посты:</span><span>4",
+            "single: 1",
+            "complete: 1",
+            "incomplete: 1",
+            "Не стали постами:</span><span>1",
+            "2\u{a0}500 мс",
+        ] {
+            assert!(body.contains(text), "missing {text}: {body}");
+        }
+        assert!(!body.contains("Результата ещё нет"), "{body}");
+        assert!(body.contains("datetime=\"2026-11-14T01:00:00Z\""), "{body}");
+        assert!(body.contains("datetime=\"2026-11-14T01:02:03Z\""), "{body}");
+    }
+}
+
+#[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
+async fn normalizer_error_is_escaped_and_keeps_previous_result(pool: PgPool) {
+    sqlx::query("UPDATE normalizer_state SET last_recalculation_started_at = '2026-11-14 00:00:00Z', last_recalculation_duration_ms = 15").execute(&pool).await.unwrap();
+    Storage::from_pool(pool.clone())
+        .record_normalizer_error(
+            "ошибка <script>bad()</script>",
+            "2026-11-14T01:02:03Z".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+    let (_, body) = get(&pool, "/status").await;
+    assert!(
+        body.contains("ошибка &#60;script&#62;bad()&#60;/script&#62;"),
+        "{body}"
+    );
+    assert!(!body.contains("<script>bad()"), "{body}");
+    assert!(body.contains("datetime=\"2026-11-14T01:02:03Z\""), "{body}");
+    assert!(body.contains("15 мс"), "{body}");
+    assert!(!body.contains("Результата ещё нет"), "{body}");
+}
+
+#[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
+async fn normalizer_links_all_parts_of_incomplete_article(pool: PgPool) {
+    insert_messages(&pool, &[101, 103]).await;
+    sqlx::query("INSERT INTO articles (id, title, search_text, status, published_at) VALUES (101, '<b>Материал</b>', 'Текст', 'incomplete', now())").execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO posts (message_id, article_id, part_no, text, published_at) VALUES (101, 101, 1, 'Первая', now()), (103, 101, 3, 'Третья', now())").execute(&pool).await.unwrap();
+    for uri in ["/", "/status"] {
+        let (_, body) = get(&pool, uri).await;
+        assert!(body.contains("&#60;b&#62;Материал&#60;/b&#62;"), "{body}");
+        assert!(
+            body.contains("href=\"https://t.me/brieflyru/101\""),
+            "{body}"
+        );
+        assert!(
+            body.contains("href=\"https://t.me/brieflyru/103\""),
+            "{body}"
+        );
     }
 }
 
