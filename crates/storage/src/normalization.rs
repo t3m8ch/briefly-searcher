@@ -1,9 +1,11 @@
 //! Чтение среза блоков и атомарная замена производных данных.
 
-use briefly_searcher_normalizer::{ArticleStatus, Normalized};
+use std::time::Instant;
+
+use briefly_searcher_normalizer::{Article, ArticleStatus, Normalized, Post};
 use briefly_searcher_telegram::Message;
 use chrono::{DateTime, Utc};
-use sqlx::{Connection, PgConnection};
+use sqlx::{Connection, PgConnection, Postgres, Transaction};
 
 use crate::{Error, Storage};
 
@@ -104,54 +106,104 @@ impl Storage {
         started_at: DateTime<Utc>,
         duration_ms: i64,
     ) -> Result<(), Error> {
-        let saving_started = std::time::Instant::now();
+        let saving_started = Instant::now();
         let mut tx = self.pool.begin().await?;
+
         sqlx::query!("TRUNCATE posts, articles")
             .execute(&mut *tx)
             .await?;
-        // Массивы построены из одного среза, поэтому длины колонок совпадают.
-        {
-            let articles = &result.articles;
-            let ids: Vec<_> = articles.iter().map(|a| a.id).collect();
-            let titles: Vec<_> = articles.iter().map(|a| a.title.as_deref()).collect();
-            let texts: Vec<_> = articles.iter().map(|a| a.search_text.as_str()).collect();
-            let statuses: Vec<_> = articles
-                .iter()
-                .map(|a| match a.status {
-                    ArticleStatus::Single => "single",
-                    ArticleStatus::Complete => "complete",
-                    ArticleStatus::Incomplete => "incomplete",
-                })
-                .collect();
-            let totals: Vec<Option<i32>> = articles
-                .iter()
-                .map(|a| a.declared_parts.map(i32::try_from).transpose())
-                .collect::<Result<_, _>>()?;
-            let dates: Vec<_> = articles.iter().map(|a| a.published_at).collect();
-            sqlx::query!("INSERT INTO articles (id, title, search_text, status, declared_parts, published_at) SELECT * FROM UNNEST($1::bigint[], $2::text[], $3::text[], $4::text[], $5::int[], $6::timestamptz[])",
-                &ids, &titles as &[Option<&str>], &texts as &[&str], &statuses as &[&str], &totals as &[Option<i32>], &dates)
-                .execute(&mut *tx).await?;
-        }
-        {
-            let posts = &result.posts;
-            let ids: Vec<_> = posts.iter().map(|p| p.message_id).collect();
-            let article_ids: Vec<_> = posts.iter().map(|p| p.article_id).collect();
-            let parts: Vec<Option<i32>> = posts
-                .iter()
-                .map(|p| p.part_no.map(i32::try_from).transpose())
-                .collect::<Result<_, _>>()?;
-            let texts: Vec<_> = posts.iter().map(|p| p.text.as_str()).collect();
-            let dates: Vec<_> = posts.iter().map(|p| p.published_at).collect();
-            let forwards: Vec<_> = posts.iter().map(|p| p.forwarded_from.as_deref()).collect();
-            sqlx::query!("INSERT INTO posts (message_id, article_id, part_no, text, published_at, forwarded_from) SELECT * FROM UNNEST($1::bigint[], $2::bigint[], $3::int[], $4::text[], $5::timestamptz[], $6::text[])",
-                &ids, &article_ids, &parts as &[Option<i32>], &texts as &[&str], &dates, &forwards as &[Option<&str>])
-                .execute(&mut *tx).await?;
-        }
-        let duration_ms = duration_ms
-            .saturating_add(saving_started.elapsed().as_millis().min(i64::MAX as u128) as i64);
-        sqlx::query!("UPDATE normalizer_state SET normalized_up_to = $1, last_recalculation_started_at = $2, last_recalculation_duration_ms = $3", boundary, started_at, duration_ms)
-            .execute(&mut *tx).await?;
+        insert_articles(&mut tx, &result.articles).await?;
+        insert_posts(&mut tx, &result.posts).await?;
+
+        let saving_duration_ms =
+            i64::try_from(saving_started.elapsed().as_millis()).unwrap_or(i64::MAX);
+        let duration_ms = duration_ms.saturating_add(saving_duration_ms);
+
+        sqlx::query!(
+            r#"
+            UPDATE normalizer_state
+            SET normalized_up_to = $1,
+                last_recalculation_started_at = $2,
+                last_recalculation_duration_ms = $3
+            "#,
+            boundary,
+            started_at,
+            duration_ms,
+        )
+        .execute(&mut *tx)
+        .await?;
+
         tx.commit().await?;
         Ok(())
     }
+}
+
+async fn insert_articles(
+    tx: &mut Transaction<'_, Postgres>,
+    articles: &[Article],
+) -> Result<(), Error> {
+    let ids: Vec<_> = articles.iter().map(|a| a.id).collect();
+    let titles: Vec<_> = articles.iter().map(|a| a.title.as_deref()).collect();
+    let texts: Vec<_> = articles.iter().map(|a| a.search_text.as_str()).collect();
+    let statuses: Vec<_> = articles
+        .iter()
+        .map(|a| match a.status {
+            ArticleStatus::Single => "single",
+            ArticleStatus::Complete => "complete",
+            ArticleStatus::Incomplete => "incomplete",
+        })
+        .collect();
+    let totals: Vec<Option<i32>> = articles
+        .iter()
+        .map(|a| a.declared_parts.map(i32::try_from).transpose())
+        .collect::<Result<_, _>>()?;
+    let dates: Vec<_> = articles.iter().map(|a| a.published_at).collect();
+    sqlx::query!(
+        r#"
+        INSERT INTO articles (id, title, search_text, status, declared_parts, published_at)
+        SELECT * FROM UNNEST(
+            $1::bigint[], $2::text[], $3::text[],
+            $4::text[], $5::int[], $6::timestamptz[]
+        )
+        "#,
+        &ids,
+        &titles as &[Option<&str>],
+        &texts as &[&str],
+        &statuses as &[&str],
+        &totals as &[Option<i32>],
+        &dates,
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn insert_posts(tx: &mut Transaction<'_, Postgres>, posts: &[Post]) -> Result<(), Error> {
+    let ids: Vec<_> = posts.iter().map(|p| p.message_id).collect();
+    let article_ids: Vec<_> = posts.iter().map(|p| p.article_id).collect();
+    let parts: Vec<Option<i32>> = posts
+        .iter()
+        .map(|p| p.part_no.map(i32::try_from).transpose())
+        .collect::<Result<_, _>>()?;
+    let texts: Vec<_> = posts.iter().map(|p| p.text.as_str()).collect();
+    let dates: Vec<_> = posts.iter().map(|p| p.published_at).collect();
+    let forwards: Vec<_> = posts.iter().map(|p| p.forwarded_from.as_deref()).collect();
+    sqlx::query!(
+        r#"
+        INSERT INTO posts (message_id, article_id, part_no, text, published_at, forwarded_from)
+        SELECT * FROM UNNEST(
+            $1::bigint[], $2::bigint[], $3::int[],
+            $4::text[], $5::timestamptz[], $6::text[]
+        )
+        "#,
+        &ids,
+        &article_ids,
+        &parts as &[Option<i32>],
+        &texts as &[&str],
+        &dates,
+        &forwards as &[Option<&str>],
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
