@@ -45,6 +45,53 @@ impl<C: Clock> Normalizer<C> {
         }
     }
 
+    /// Держит блокировку весь срок работы. Сигнал прерывает ожидание или
+    /// текущую асинхронную операцию; незавершённая транзакция откатывается.
+    pub async fn run(
+        &self,
+        lock: NormalizerLock,
+        shutdown: impl Future<Output = ()>,
+    ) -> Result<(), Error> {
+        let mut shutdown = pin!(shutdown);
+        let mut force = true;
+        loop {
+            tokio::select! {
+                biased;
+                () = &mut shutdown => break,
+                result = self.poll(force) => match result {
+                    Ok(_) => force = false,
+                    Err(error) => tracing::error!(%error, "пересчёт прерван, повтор на следующем опросе"),
+                }
+            }
+            let deadline = self.clock.now() + self.poll_interval;
+            let stopped = loop {
+                let now = self.clock.now();
+                if now >= deadline {
+                    break false;
+                }
+                tokio::select! {
+                    biased;
+                    () = &mut shutdown => break true,
+                    () = self.clock.sleep_until(deadline.min(now + TimeDelta::seconds(15))) => {}
+                }
+                tokio::select! {
+                    biased;
+                    () = &mut shutdown => break true,
+                    result = self.storage.record_normalizer_heartbeat(self.clock.now()) => {
+                        if let Err(error) = result {
+                            tracing::warn!(%error, "не удалось записать heartbeat нормализатора");
+                        }
+                    }
+                }
+            };
+            if stopped {
+                break;
+            }
+        }
+        lock.release().await?;
+        Ok(())
+    }
+
     /// Один опрос; `force` применяет правила независимо от сохранённой границы.
     /// Ошибка записывается отдельно от транзакции публикации результата.
     async fn poll(&self, force: bool) -> Result<bool, Error> {
@@ -99,52 +146,5 @@ impl<C: Clock> Normalizer<C> {
             "пересчёт завершён"
         );
         Ok(true)
-    }
-
-    /// Держит блокировку весь срок работы. Сигнал прерывает ожидание или
-    /// текущую асинхронную операцию; незавершённая транзакция откатывается.
-    pub async fn run(
-        &self,
-        lock: NormalizerLock,
-        shutdown: impl Future<Output = ()>,
-    ) -> Result<(), Error> {
-        let mut shutdown = pin!(shutdown);
-        let mut force = true;
-        loop {
-            tokio::select! {
-                biased;
-                () = &mut shutdown => break,
-                result = self.poll(force) => match result {
-                    Ok(_) => force = false,
-                    Err(error) => tracing::error!(%error, "пересчёт прерван, повтор на следующем опросе"),
-                }
-            }
-            let deadline = self.clock.now() + self.poll_interval;
-            let stopped = loop {
-                let now = self.clock.now();
-                if now >= deadline {
-                    break false;
-                }
-                tokio::select! {
-                    biased;
-                    () = &mut shutdown => break true,
-                    () = self.clock.sleep_until(deadline.min(now + TimeDelta::seconds(15))) => {}
-                }
-                tokio::select! {
-                    biased;
-                    () = &mut shutdown => break true,
-                    result = self.storage.record_normalizer_heartbeat(self.clock.now()) => {
-                        if let Err(error) = result {
-                            tracing::warn!(%error, "не удалось записать heartbeat нормализатора");
-                        }
-                    }
-                }
-            };
-            if stopped {
-                break;
-            }
-        }
-        lock.release().await?;
-        Ok(())
     }
 }
