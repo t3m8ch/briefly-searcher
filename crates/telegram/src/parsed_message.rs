@@ -23,6 +23,7 @@ pub struct ParsedMessage {
     pub id: i64,
     pub published_at: DateTime<Utc>,
     pub kind: MessageKind,
+    /// ID элементов альбома; пустой список, если веб-лента не показала медиа.
     pub album_ids: Vec<i64>,
     pub text: String,
     pub reply_to: Option<i64>,
@@ -151,7 +152,9 @@ fn album_message_ids(
             ids.push(item);
         }
     }
-    if ids.len() < 2 || ids.first() != Some(&id) {
+    // Веб-лента иногда отдаёт пустую сетку медиа с доступной подписью.
+    // Состав неизвестен: не выдумываем ID, но сохраняем видимый текст.
+    if !ids.is_empty() && (ids.len() < 2 || ids.first() != Some(&id)) {
         return Err("неполный состав альбома");
     }
     Ok(ids)
