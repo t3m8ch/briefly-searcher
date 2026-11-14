@@ -150,6 +150,22 @@ fn invalid_payload_and_unexpected_markup_are_errors() {
 }
 
 #[test]
+fn unsupported_media_placeholder_is_not_publication_text() {
+    let parsed = parse_message(&block(
+        48041,
+        include_str!("fixtures/blocks/unsupported-48041.html"),
+    ))
+    .unwrap();
+    assert_eq!(parsed.kind, MessageKind::Unsupported);
+    assert!(parsed.text.is_empty());
+    assert!(parsed.album_ids.is_empty());
+    assert_eq!(
+        parsed.published_at.to_rfc3339(),
+        "2026-10-18T20:47:15+00:00"
+    );
+}
+
+#[test]
 fn album_without_item_links_preserves_available_caption() {
     let parsed = parse_message(&block(
         19933,

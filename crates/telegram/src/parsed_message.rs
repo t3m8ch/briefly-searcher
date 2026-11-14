@@ -14,6 +14,8 @@ pub enum MessageKind {
     Album,
     Poll,
     Service,
+    /// Веб-лента показывает заглушку вместо неподдерживаемого медиа.
+    Unsupported,
 }
 
 /// Представление блока, не зависящее от формата источника.
@@ -128,6 +130,10 @@ fn message_kind(root: ElementRef<'_>) -> Result<MessageKind, &'static str> {
         (".tgme_widget_message_video_wrap", MessageKind::Video),
         (".tgme_widget_message_photo_wrap", MessageKind::Photo),
         (".tgme_widget_message_text", MessageKind::Text),
+        (
+            ".message_media_not_supported_wrap",
+            MessageKind::Unsupported,
+        ),
     ] {
         if root.select(&selector(css)).next().is_some() {
             return Ok(kind);
