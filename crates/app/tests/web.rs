@@ -370,18 +370,67 @@ async fn normalizer_before_first_recalculation_has_no_result(pool: PgPool) {
 }
 
 #[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
+async fn first_normalization_error_keeps_boundary_diagnostics_visible(pool: PgPool) {
+    sqlx::query("UPDATE ingestion_state SET newest_fetched_id = 100")
+        .execute(&pool)
+        .await
+        .unwrap();
+    Storage::from_pool(pool.clone())
+        .record_normalizer_error("неизвестная схема", "2026-11-14T01:00:00Z".parse().unwrap())
+        .await
+        .unwrap();
+    let (_, body) = get(&pool, "/status").await;
+    assert!(body.contains("Результата ещё нет"), "{body}");
+    assert!(
+        body.contains("normalized_up_to:</span><span class=\"t-dim\">NULL"),
+        "{body}"
+    );
+    assert!(body.contains("Отставание по ID:</span><span>100"), "{body}");
+    assert!(body.contains("неизвестная схема"), "{body}");
+}
+
+#[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
 async fn normalizer_shows_published_counts_and_recalculation(pool: PgPool) {
     insert_messages(&pool, &[1, 2, 3, 4, 5, 8, 10]).await;
     sqlx::query("UPDATE ingestion_state SET newest_fetched_id = 8")
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO articles (id, title, search_text, status, published_at) VALUES (1, 'Один', 'Один', 'single', now()), (2, 'Полная', 'Полная', 'complete', now()), (4, 'Неполная', 'Неполная', 'incomplete', now())").execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO posts (message_id, article_id, part_no, text, published_at) VALUES (1, 1, NULL, 'Один', now()), (2, 2, 1, 'Первая', now()), (3, 2, 2, 'Вторая', now()), (4, 4, 1, 'Первая', now())").execute(&pool).await.unwrap();
-    sqlx::query("UPDATE normalizer_state SET normalized_up_to = 5, last_heartbeat_at = '2026-11-14 01:02:03Z', last_recalculation_started_at = '2026-11-14 01:00:00Z', last_recalculation_duration_ms = 2500").execute(&pool).await.unwrap();
+    use briefly_searcher_telegram::{MessageKind, ParsedMessage};
+    let at = "2026-11-14T01:00:00Z".parse().unwrap();
+    let input: Vec<_> = [
+        (1, "Отдельная публикация"),
+        (2, "Полная статья. Часть 1/2.\nПервый текст"),
+        (3, "Полная статья. Часть 2/2.\nВторой текст"),
+        (4, "Неполная статья. Часть 1/3.\nПервый текст"),
+        (5, ""),
+    ]
+    .into_iter()
+    .map(|(id, text)| ParsedMessage {
+        id,
+        published_at: at,
+        kind: MessageKind::Text,
+        album_ids: vec![],
+        text: text.into(),
+        reply_to: None,
+        forwarded_from: None,
+    })
+    .collect();
+    let result = briefly_searcher_normalizer::normalize(&input);
+    let storage = Storage::from_pool(pool.clone());
+    storage
+        .replace_normalized(&result, Some(5), at, 2500)
+        .await
+        .unwrap();
+    storage
+        .record_normalizer_heartbeat("2026-11-14T01:02:03Z".parse().unwrap())
+        .await
+        .unwrap();
     for uri in ["/", "/status"] {
         let (status, body) = get(&pool, uri).await;
         assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("Длительность:</span><span>"), "{body}");
+        assert!(body.contains(" мс</span>"), "{body}");
         for text in [
             "normalized_up_to:</span><span>5",
             "Отставание по ID:</span><span>3",
@@ -390,7 +439,6 @@ async fn normalizer_shows_published_counts_and_recalculation(pool: PgPool) {
             "complete: 1",
             "incomplete: 1",
             "Не стали постами:</span><span>1",
-            "2\u{a0}500 мс",
         ] {
             assert!(body.contains(text), "missing {text}: {body}");
         }

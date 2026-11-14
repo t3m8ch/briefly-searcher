@@ -100,10 +100,12 @@
   <span class="t-label">Heartbeat нормализатора:</span>
   {% if let Some(at) = s.normalizer.heartbeat %}<span>{% call moment(at) %}{% endcall %} · {{ at.relative }}</span>{% else %}<span class="t-dim">ещё не запускался</span>{% endif %}
 </div>
+<div class="head">
+  <span class="t-label">normalized_up_to:</span>{% if let Some(id) = s.normalizer.boundary %}<span>{{ id }}</span>{% else %}<span class="t-dim">NULL · граница результата ещё не задана</span>{% endif %}
+  <span class="t-label">Отставание по ID:</span>{% if let Some(lag) = s.normalizer.lag %}<span>{{ lag }}</span>{% else %}<span class="t-dim">граница загрузки ещё не задана</span>{% endif %}
+</div>
 {% if s.normalizer.ready %}
 <div class="head">
-  <span class="t-label">normalized_up_to:</span>{% if let Some(id) = s.normalizer.boundary %}<span>{{ id }}</span>{% else %}<span class="t-dim">NULL · ждёт завершения первого прохода загрузчика</span>{% endif %}
-  <span class="t-label">Отставание по ID:</span>{% if let Some(lag) = s.normalizer.lag %}<span>{{ lag }}</span>{% else %}<span class="t-dim">граница загрузки ещё не задана</span>{% endif %}
   <span class="t-label">Последний пересчёт:</span>{% if let Some(at) = s.normalizer.recalculation %}<span>{% call moment(at) %}{% endcall %} · {{ at.relative }}</span>{% else %}<span>—</span>{% endif %}
   <span class="t-label">Длительность:</span>{% if let Some(duration) = s.normalizer.duration %}<span>{{ duration }}</span>{% else %}<span>—</span>{% endif %}
   <span class="t-label">Посты:</span><span>{{ s.normalizer.posts }}</span>
