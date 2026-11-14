@@ -78,6 +78,28 @@ pub struct AdminSummary {
     pub last_error_at: Option<DateTime<Utc>>,
     /// Когда загрузчик повторит попытку после ошибки.
     pub next_attempt_at: Option<DateTime<Utc>>,
+    pub normalized_up_to: Option<i64>,
+    pub normalizer_heartbeat_at: Option<DateTime<Utc>>,
+    pub normalizer_error: Option<String>,
+    pub normalizer_error_at: Option<DateTime<Utc>>,
+    pub normalizer_recalculation_started_at: Option<DateTime<Utc>>,
+    pub normalizer_recalculation_duration_ms: Option<i64>,
+    pub posts_count: i64,
+    /// Блоки до опубликованной границы, не образовавшие постов.
+    pub excluded_blocks_count: i64,
+    pub single_articles_count: i64,
+    pub complete_articles_count: i64,
+    pub incomplete_articles_count: i64,
+    /// Последние 20 неполных статей, от новых к старым.
+    pub incomplete_articles: sqlx::types::Json<Vec<IncompleteArticle>>,
+}
+
+/// Неполная статья и ID её постов в порядке частей.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+pub struct IncompleteArticle {
+    pub id: i64,
+    pub title: Option<String>,
+    pub part_ids: Vec<i64>,
 }
 
 /// Ключ session-level advisory-блокировки единственного экземпляра
@@ -295,8 +317,32 @@ impl Storage {
                 w.last_heartbeat_at,
                 w.last_error,
                 w.last_error_at,
-                w.next_attempt_at
-            FROM ingestion_state i CROSS JOIN worker_state w
+                w.next_attempt_at,
+                n.normalized_up_to,
+                n.last_heartbeat_at AS normalizer_heartbeat_at,
+                n.last_error AS normalizer_error,
+                n.last_error_at AS normalizer_error_at,
+                n.last_recalculation_started_at AS normalizer_recalculation_started_at,
+                n.last_recalculation_duration_ms AS normalizer_recalculation_duration_ms,
+                (SELECT count(*) FROM posts) AS "posts_count!",
+                (SELECT count(*) FROM raw_posts r
+                 WHERE r.message_id <= n.normalized_up_to
+                   AND NOT EXISTS (SELECT 1 FROM posts p WHERE p.message_id = r.message_id)
+                ) AS "excluded_blocks_count!",
+                (SELECT count(*) FROM articles WHERE status = 'single') AS "single_articles_count!",
+                (SELECT count(*) FROM articles WHERE status = 'complete') AS "complete_articles_count!",
+                (SELECT count(*) FROM articles WHERE status = 'incomplete') AS "incomplete_articles_count!",
+                (SELECT COALESCE(jsonb_agg(item ORDER BY published_at DESC, id DESC), '[]'::jsonb)
+                 FROM (
+                    SELECT a.id, a.published_at,
+                           jsonb_build_object('id', a.id, 'title', a.title,
+                               'part_ids', (SELECT COALESCE(jsonb_agg(p.message_id ORDER BY p.part_no, p.message_id), '[]'::jsonb)
+                                            FROM posts p WHERE p.article_id = a.id)) AS item
+                    FROM articles a WHERE a.status = 'incomplete'
+                    ORDER BY a.published_at DESC, a.id DESC LIMIT 20
+                 ) recent
+                ) AS "incomplete_articles!: sqlx::types::Json<Vec<IncompleteArticle>>"
+            FROM ingestion_state i CROSS JOIN worker_state w CROSS JOIN normalizer_state n
             "#
         )
         .fetch_one(&self.pool)

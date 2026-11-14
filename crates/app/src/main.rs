@@ -131,7 +131,7 @@ async fn serve_web() -> anyhow::Result<()> {
             "адрес не loopback, но админка отвечает только на запросы к localhost"
         );
     }
-    web::serve(listener, storage, shutdown_signal())
+    web::serve(listener, storage, config.channel, shutdown_signal())
         .await
         .context("веб-сервер")?;
     tracing::info!("веб-админка остановлена");

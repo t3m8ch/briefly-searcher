@@ -16,6 +16,7 @@ const HEARTBEAT_STALE_AFTER: TimeDelta =
 pub struct StatusView {
     pub now: Moment,
     pub loader: LoaderView,
+    pub normalizer: NormalizerView,
     pub history: HistoryView,
     /// «21 902 сообщения».
     pub raw_posts: String,
@@ -114,7 +115,7 @@ pub struct Note {
 
 impl StatusView {
     /// Выводит состояние загрузчика, строку истории и журнал из сводки.
-    pub fn new(summary: &AdminSummary) -> Self {
+    pub fn new(summary: &AdminSummary, channel: &str) -> Self {
         let now = summary.now;
         let pause_active = summary.flood_wait_until.is_some_and(|until| until > now);
         // Загрузчик не очищает last_error; ошибка прошла, если после неё был успешный запрос.
@@ -226,6 +227,7 @@ impl StatusView {
 
         Self {
             now: Moment::new(now, now),
+            normalizer: NormalizerView::new(summary, channel),
             loader,
             history: HistoryView::new(summary.newest_fetched_id, summary.pass_reached_id),
             raw_posts: format!(
@@ -239,6 +241,87 @@ impl StatusView {
             newest_fetched_id: summary.newest_fetched_id.map(group_digits),
             future: into_view(future),
             past: into_view(past),
+        }
+    }
+}
+
+/// Диагностика нормализатора без управляющих действий.
+pub struct NormalizerView {
+    pub heartbeat: Option<Moment>,
+    pub error: Option<String>,
+    pub error_at: Option<Moment>,
+    pub ready: bool,
+    pub boundary: Option<String>,
+    pub lag: Option<String>,
+    pub recalculation: Option<Moment>,
+    pub duration: Option<String>,
+    pub posts: String,
+    pub excluded: String,
+    pub single: String,
+    pub complete: String,
+    pub incomplete: String,
+    pub articles: Vec<IncompleteArticleView>,
+}
+
+pub struct IncompleteArticleView {
+    pub title: String,
+    pub parts: Vec<ArticlePartView>,
+}
+
+pub struct ArticlePartView {
+    pub id: i64,
+    pub url: String,
+}
+
+impl NormalizerView {
+    fn new(summary: &AdminSummary, channel: &str) -> Self {
+        Self {
+            articles: summary
+                .incomplete_articles
+                .0
+                .iter()
+                .map(|article| IncompleteArticleView {
+                    title: article
+                        .title
+                        .clone()
+                        .unwrap_or_else(|| format!("Статья {}", article.id)),
+                    parts: article
+                        .part_ids
+                        .iter()
+                        .map(|&id| ArticlePartView {
+                            id,
+                            url: format!("https://t.me/{channel}/{id}"),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            heartbeat: summary
+                .normalizer_heartbeat_at
+                .map(|at| Moment::new(at, summary.now)),
+            error: summary.normalizer_error.clone(),
+            error_at: summary
+                .normalizer_error_at
+                .map(|at| Moment::new(at, summary.now)),
+            ready: summary.normalizer_recalculation_started_at.is_some(),
+            boundary: summary.normalized_up_to.map(group_digits),
+            lag: summary.newest_fetched_id.map(|newest| {
+                group_digits(
+                    newest
+                        .saturating_sub(summary.normalized_up_to.unwrap_or(0))
+                        .max(0),
+                )
+            }),
+            recalculation: summary
+                .normalizer_recalculation_started_at
+                .map(|at| Moment::new(at, summary.now)),
+            duration: summary
+                .normalizer_recalculation_duration_ms
+                .map(|ms| format!("{} мс", group_digits(ms))),
+            posts: group_digits(summary.posts_count),
+            excluded: group_digits(summary.excluded_blocks_count),
+            single: group_digits(summary.single_articles_count),
+            complete: group_digits(summary.complete_articles_count),
+            incomplete: group_digits(summary.incomplete_articles_count),
         }
     }
 }

@@ -1,0 +1,233 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                now() AS \"now!\",\n                i.newest_fetched_id,\n                -- Как в pass_state: без OR min() читает одну запись индекса.\n                (SELECT min(message_id) FROM raw_posts\n                  WHERE message_id > COALESCE(i.newest_fetched_id, 0)\n                ) AS pass_reached_id,\n                (SELECT count(*) FROM raw_posts) AS \"raw_posts_count!\",\n                i.flood_wait_until,\n                i.last_successful_request_at,\n                w.last_heartbeat_at,\n                w.last_error,\n                w.last_error_at,\n                w.next_attempt_at,\n                n.normalized_up_to,\n                n.last_heartbeat_at AS normalizer_heartbeat_at,\n                n.last_error AS normalizer_error,\n                n.last_error_at AS normalizer_error_at,\n                n.last_recalculation_started_at AS normalizer_recalculation_started_at,\n                n.last_recalculation_duration_ms AS normalizer_recalculation_duration_ms,\n                (SELECT count(*) FROM posts) AS \"posts_count!\",\n                (SELECT count(*) FROM raw_posts r\n                 WHERE r.message_id <= n.normalized_up_to\n                   AND NOT EXISTS (SELECT 1 FROM posts p WHERE p.message_id = r.message_id)\n                ) AS \"excluded_blocks_count!\",\n                (SELECT count(*) FROM articles WHERE status = 'single') AS \"single_articles_count!\",\n                (SELECT count(*) FROM articles WHERE status = 'complete') AS \"complete_articles_count!\",\n                (SELECT count(*) FROM articles WHERE status = 'incomplete') AS \"incomplete_articles_count!\",\n                (SELECT COALESCE(jsonb_agg(item ORDER BY published_at DESC, id DESC), '[]'::jsonb)\n                 FROM (\n                    SELECT a.id, a.published_at,\n                           jsonb_build_object('id', a.id, 'title', a.title,\n                               'part_ids', (SELECT COALESCE(jsonb_agg(p.message_id ORDER BY p.part_no, p.message_id), '[]'::jsonb)\n                                            FROM posts p WHERE p.article_id = a.id)) AS item\n                    FROM articles a WHERE a.status = 'incomplete'\n                    ORDER BY a.published_at DESC, a.id DESC LIMIT 20\n                 ) recent\n                ) AS \"incomplete_articles!: sqlx::types::Json<Vec<IncompleteArticle>>\"\n            FROM ingestion_state i CROSS JOIN worker_state w CROSS JOIN normalizer_state n\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "now!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "newest_fetched_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ingestion_state",
+            "name": "newest_fetched_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "pass_reached_id",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "raw_posts_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "flood_wait_until",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ingestion_state",
+            "name": "flood_wait_until"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "last_successful_request_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ingestion_state",
+            "name": "last_successful_request_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "last_heartbeat_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "worker_state",
+            "name": "last_heartbeat_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "worker_state",
+            "name": "last_error"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "last_error_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "worker_state",
+            "name": "last_error_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "next_attempt_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "worker_state",
+            "name": "next_attempt_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "normalized_up_to",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "normalizer_state",
+            "name": "normalized_up_to"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "normalizer_heartbeat_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "normalizer_state",
+            "name": "last_heartbeat_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "normalizer_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalizer_state",
+            "name": "last_error"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "normalizer_error_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "normalizer_state",
+            "name": "last_error_at"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "normalizer_recalculation_started_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "normalizer_state",
+            "name": "last_recalculation_started_at"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "normalizer_recalculation_duration_ms",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "normalizer_state",
+            "name": "last_recalculation_duration_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "posts_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 17,
+        "name": "excluded_blocks_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 18,
+        "name": "single_articles_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 19,
+        "name": "complete_articles_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 20,
+        "name": "incomplete_articles_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 21,
+        "name": "incomplete_articles!: sqlx::types::Json<Vec<IncompleteArticle>>",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      true,
+      null,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "cdd5ce5345462622ba21cbccb87b0c5c422fce22e9ea0f80389116ff1d446058"
+}

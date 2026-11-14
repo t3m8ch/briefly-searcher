@@ -28,9 +28,10 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 pub async fn serve(
     listener: TcpListener,
     storage: Storage,
+    channel: String,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    let app = router(storage).layer(TimeoutLayer::with_status_code(
+    let app = router(storage, channel).layer(TimeoutLayer::with_status_code(
         StatusCode::SERVICE_UNAVAILABLE,
         REQUEST_TIMEOUT,
     ));
@@ -39,14 +40,20 @@ pub async fn serve(
         .await
 }
 
-/// Роутер админки над хранилищем.
-pub fn router(storage: Storage) -> Router {
+#[derive(Clone)]
+struct WebState {
+    storage: Storage,
+    channel: String,
+}
+
+/// Роутер админки над хранилищем; channel — имя Telegram-канала без @.
+pub fn router(storage: Storage, channel: String) -> Router {
     Router::new()
         .route("/", get(page))
         .route("/status", get(status))
         .route("/htmx.min.js", get(htmx))
         .layer(middleware::from_fn(require_loopback_host))
-        .with_state(storage)
+        .with_state(WebState { storage, channel })
 }
 
 /// htmx 2.0.11, вшитый в бинарник: релиз — это бинарник и окружение, без CDN.
@@ -66,22 +73,22 @@ struct StatusFragment {
     s: StatusView,
 }
 
-async fn page(State(storage): State<Storage>) -> Response {
-    summary_view(&storage)
+async fn page(State(state): State<WebState>) -> Response {
+    summary_view(&state)
         .await
         .map_or_else(|response| response, |s| render(Page { s }))
 }
 
-async fn status(State(storage): State<Storage>) -> Response {
-    summary_view(&storage)
+async fn status(State(state): State<WebState>) -> Response {
+    summary_view(&state)
         .await
         .map_or_else(|response| response, |s| render(StatusFragment { s }))
 }
 
 /// Сводка для шаблона; при ошибке хранилища — готовый ответ 5xx.
-async fn summary_view(storage: &Storage) -> Result<StatusView, Response> {
-    match storage.admin_summary().await {
-        Ok(summary) => Ok(StatusView::new(&summary)),
+async fn summary_view(state: &WebState) -> Result<StatusView, Response> {
+    match state.storage.admin_summary().await {
+        Ok(summary) => Ok(StatusView::new(&summary, &state.channel)),
         Err(error) => {
             tracing::error!(%error, "не удалось прочитать сводку для админки");
             Err(unavailable())

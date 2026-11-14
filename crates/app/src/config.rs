@@ -14,6 +14,8 @@ pub struct DatabaseConfig {
 /// Конфигурация команды `web`.
 #[derive(Debug, Envconfig)]
 pub struct WebConfig {
+    #[envconfig(from = "TELEGRAM_CHANNEL", default = "brieflyru")]
+    pub channel: String,
     #[envconfig(nested)]
     pub database: DatabaseConfig,
     /// Адрес, который слушает веб-админка; по умолчанию только loopback.
