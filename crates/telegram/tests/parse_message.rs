@@ -150,14 +150,38 @@ fn invalid_payload_and_unexpected_markup_are_errors() {
 }
 
 #[test]
-fn album_without_item_links_is_an_error_instead_of_partial_success() {
+fn album_without_item_links_preserves_available_caption() {
+    let parsed = parse_message(&block(
+        19933,
+        include_str!("fixtures/blocks/album-19933.html"),
+    ))
+    .unwrap();
+    assert_eq!(parsed.kind, MessageKind::Album);
+    assert!(parsed.album_ids.is_empty());
+    assert!(parsed.text.starts_with(
+        "The Wall Street Journal: Армия Украины сталкивается с растущей нехваткой войск. Часть 1:"
+    ));
     assert!(
-        parse_message(&block(
-            35361,
-            include_str!("fixtures/blocks/empty-album-35361.html")
-        ))
-        .is_err()
+        parsed
+            .text
+            .contains("Законопроект, направленный на расширение призыва")
     );
+    assert!(parsed.text.ends_with("Подписаться."));
+}
+
+#[test]
+fn album_without_item_links_keeps_unknown_composition() {
+    let parsed = parse_message(&block(
+        35361,
+        include_str!("fixtures/blocks/empty-album-35361.html"),
+    ))
+    .unwrap();
+    assert_eq!(parsed.kind, MessageKind::Album);
+    assert!(parsed.album_ids.is_empty());
+}
+
+#[test]
+fn album_with_broken_item_link_is_still_an_error() {
     let html = include_str!("fixtures/blocks/album-562.html")
         .replace("href=\"https://t.me/brieflyru/563?single\"", "");
     assert!(parse_message(&block(562, &html)).is_err());
