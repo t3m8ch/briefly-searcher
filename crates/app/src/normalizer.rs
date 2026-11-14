@@ -47,7 +47,7 @@ impl<C: Clock> Normalizer<C> {
 
     /// Один опрос; `force` применяет правила независимо от сохранённой границы.
     /// Ошибка записывается отдельно от транзакции публикации результата.
-    pub async fn poll(&self, force: bool) -> Result<bool, Error> {
+    async fn poll(&self, force: bool) -> Result<bool, Error> {
         let result = self.recalculate_if_needed(force).await;
         if let Err(error) = &result {
             // Подробности ошибок БД могут содержать значения строк. В состоянии

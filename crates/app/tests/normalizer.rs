@@ -19,31 +19,57 @@ async fn startup_rebuilds_then_only_boundary_growth_triggers_rebuild(pool: PgPoo
         .await
         .unwrap();
     let storage = Storage::from_pool(pool.clone());
-    let normalizer = Normalizer::new(storage.clone(), SystemClock, TimeDelta::seconds(30));
-    assert!(normalizer.poll(true).await.unwrap());
-    let first = storage.normalizer_state().await.unwrap();
-    assert!(!normalizer.poll(false).await.unwrap());
+    let process = RunningNormalizer::start(&storage).await;
+    let first = storage
+        .normalizer_state()
+        .await
+        .unwrap()
+        .last_recalculation_started_at;
+    assert_eq!(
+        storage.normalizer_state().await.unwrap().normalized_up_to,
+        Some(1)
+    );
+    process.next_poll().await;
     assert_eq!(
         storage
             .normalizer_state()
             .await
             .unwrap()
             .last_recalculation_started_at,
-        first.last_recalculation_started_at
+        first
     );
     add_block(&pool, 2).await;
-    assert!(!normalizer.poll(false).await.unwrap());
+    process.next_poll().await;
+    assert_eq!(
+        storage.normalizer_state().await.unwrap().normalized_up_to,
+        Some(1)
+    );
+    assert_eq!(
+        storage
+            .normalizer_state()
+            .await
+            .unwrap()
+            .last_recalculation_started_at,
+        first
+    );
     sqlx::query("UPDATE ingestion_state SET newest_fetched_id = 2")
         .execute(&pool)
         .await
         .unwrap();
-    assert!(normalizer.poll(false).await.unwrap());
-    assert_eq!(
-        storage.normalizer_state().await.unwrap().normalized_up_to,
-        Some(2)
+    process.next_poll().await;
+    let updated = storage.normalizer_state().await.unwrap();
+    assert_eq!(updated.normalized_up_to, Some(2));
+    assert_ne!(updated.last_recalculation_started_at, first);
+    process.stop().await;
+    // Новый процесс применяет правила даже при прежней границе загрузки.
+    let process = RunningNormalizer::start(&storage).await;
+    let restarted = storage.normalizer_state().await.unwrap();
+    assert_eq!(restarted.normalized_up_to, Some(2));
+    assert_ne!(
+        restarted.last_recalculation_started_at,
+        updated.last_recalculation_started_at
     );
-    // Новый процесс принудительно применяет правила даже при прежней границе.
-    assert!(normalizer.poll(true).await.unwrap());
+    process.stop().await;
 }
 
 #[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
@@ -54,14 +80,13 @@ async fn malformed_block_keeps_published_result_and_records_error(pool: PgPool) 
         .await
         .unwrap();
     let storage = Storage::from_pool(pool.clone());
-    let normalizer = Normalizer::new(storage.clone(), SystemClock, TimeDelta::seconds(30));
-    normalizer.poll(true).await.unwrap();
+    let process = RunningNormalizer::start(&storage).await;
     sqlx::query("INSERT INTO raw_posts (message_id, payload, payload_schema) VALUES (2, '{}', 't.me/s html v1')").execute(&pool).await.unwrap();
     sqlx::query("UPDATE ingestion_state SET newest_fetched_id = 2")
         .execute(&pool)
         .await
         .unwrap();
-    assert!(normalizer.poll(false).await.is_err());
+    process.next_poll().await;
     let state = storage.normalizer_state().await.unwrap();
     assert_eq!(state.normalized_up_to, Some(1));
     assert!(state.last_error.unwrap().contains("блок 2"));
@@ -76,11 +101,12 @@ async fn malformed_block_keeps_published_result_and_records_error(pool: PgPool) 
         .await
         .unwrap();
     add_block(&pool, 2).await;
-    assert!(normalizer.poll(false).await.unwrap());
+    process.next_poll().await;
     assert_eq!(
         storage.normalizer_state().await.unwrap().normalized_up_to,
         Some(2)
     );
+    process.stop().await;
 }
 
 #[sqlx::test(migrator = "briefly_searcher_storage::MIGRATOR")]
@@ -102,10 +128,7 @@ async fn lock_is_independent_of_loader_and_released_on_shutdown(pool: PgPool) {
 async fn null_boundary_publishes_empty_result(pool: PgPool) {
     add_block(&pool, 1).await;
     let storage = Storage::from_pool(pool.clone());
-    Normalizer::new(storage.clone(), SystemClock, TimeDelta::seconds(30))
-        .poll(true)
-        .await
-        .unwrap();
+    let process = RunningNormalizer::start(&storage).await;
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM posts")
         .fetch_one(&pool)
         .await
@@ -119,6 +142,7 @@ async fn null_boundary_publishes_empty_result(pool: PgPool) {
             .last_recalculation_started_at
             .is_some()
     );
+    process.stop().await;
 }
 
 /// Часы отдают управление тесту на каждом ожидании, без реальных пауз.
@@ -247,4 +271,48 @@ async fn shutdown_interrupts_heartbeat_waiting_for_database_lock(pool: PgPool) {
         .unwrap();
     blocker.rollback().await.unwrap();
     lock(&storage).await.unwrap().release().await.unwrap();
+}
+
+/// Запущенный через публичный интерфейс процесс; каждый шаг завершается
+/// ожиданием следующего опроса, когда результат уже доступен в хранилище.
+struct RunningNormalizer {
+    clock: ControlledClock,
+    stop: tokio::sync::oneshot::Sender<()>,
+    process: tokio::task::JoinHandle<Result<(), briefly_searcher::normalizer::Error>>,
+}
+
+impl RunningNormalizer {
+    async fn start(storage: &Storage) -> Self {
+        let clock = ControlledClock {
+            now: std::sync::Arc::new(std::sync::Mutex::new(chrono::Utc::now())),
+            waiting: Default::default(),
+            advance: Default::default(),
+        };
+        let guard = briefly_searcher::normalizer::lock(storage).await.unwrap();
+        let normalizer = Normalizer::new(storage.clone(), clock.clone(), TimeDelta::seconds(15));
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        let process = tokio::spawn(async move {
+            normalizer
+                .run(guard, async {
+                    stopped.await.unwrap();
+                })
+                .await
+        });
+        clock.waiting.notified().await;
+        Self {
+            clock,
+            stop,
+            process,
+        }
+    }
+
+    async fn next_poll(&self) {
+        self.clock.advance.notify_one();
+        self.clock.waiting.notified().await;
+    }
+
+    async fn stop(self) {
+        self.stop.send(()).unwrap();
+        self.process.await.unwrap().unwrap();
+    }
 }
